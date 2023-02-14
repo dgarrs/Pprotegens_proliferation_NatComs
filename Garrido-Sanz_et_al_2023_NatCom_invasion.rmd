@@ -1,5 +1,3 @@
-# Garrido-Sanz_et_al_2023_NatCom_invasion
-
 ---
 title: "Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon invasion invasion by a plant-beneficial inoculant"
 author: "Daniel Garrido-Sanz (daniel.garridosanz@unil.ch)"
