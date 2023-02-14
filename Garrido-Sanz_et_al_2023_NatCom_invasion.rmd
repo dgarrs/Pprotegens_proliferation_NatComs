@@ -3,12 +3,7 @@ title: "Changes in structure and assembly of a species-rich soil natural communi
 author: "Daniel Garrido-Sanz (daniel.garridosanz@unil.ch)"
 affiliation: "Kell Lab | Department of fundamental microbiology | University of Lausanne"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: 
-  rmdformats::html_clean:
-    code_folding: hide
-    toc: true
-    thumbnails: false
-    toc_depth: 3
+output: github_document
 pkgdown:
   as_is: true
 ---
