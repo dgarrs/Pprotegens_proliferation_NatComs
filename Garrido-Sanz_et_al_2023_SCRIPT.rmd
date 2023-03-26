@@ -1,5 +1,5 @@
 ---
-title: "Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon invasion invasion by a plant-beneficial inoculant"
+title: "Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon establishment of a plant-beneficial Pseudomonas in the wheat rhizosphere"
 author: "Daniel Garrido-Sanz (daniel.garridosanz@unil.ch)"
 affiliation: "Kell Lab | Department of fundamental microbiology | University of Lausanne"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
