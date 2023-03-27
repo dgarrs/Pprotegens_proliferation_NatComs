@@ -1,4 +1,4 @@
-# Garrido-Sanz_et_al_2023_NatCom_invasion
+# Garrido-Sanz et al 2023. Pseudomonas protegens proliferation in NatComs
 
 R script of the analysis used in *Garrido-Sanz et al., 2023* ...
 **Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon establishment of a plant-beneficial Pseudomonas in the wheat rhizosphere**
