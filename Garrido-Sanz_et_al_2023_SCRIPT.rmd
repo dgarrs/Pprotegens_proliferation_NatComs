@@ -433,7 +433,7 @@ ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
 ```
 
 
-# 7. Bar plots:
+# 7. Bar plots and differences:
 
 ```{r}
 #Showing individual replicates. Top 100 taxa
@@ -569,7 +569,7 @@ Class_tax = as.data.frame(tax_table(Class_glom)) %>% rownames_to_column(var = "a
 Class_abundtax = left_join(Class_abund.melt, Class_tax, by=c("variable"="asvs"))
 head(Class_abundtax)
 
-#Are there different at the Community state level? - in all of them!
+#Are there different at the Community state level? - in all of them?
 #Remove very low abundant clases
 ggplot(filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
                 Class!="Clostridia" & Class!="Longimicrobia" &
@@ -581,7 +581,6 @@ ggplot(filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" 
        aes(x=StateEnviron, y=abund)) +
   geom_boxplot(width=0.9)+
   geom_jitter(aes(color=Class), size=0.5, shape=16)+
-  stat_compare_means(test="kruskal.test", label = "p.signif", symnum.args = symnum.args, comparisons=CHA0_comparisons) +
   xlab("") + ylab("ASVs normalized relative abundance (%)")+
   ggtitle("Class abundance", subtitle = "significance: Kruskal test")+
   scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))+
@@ -595,14 +594,101 @@ ggplot(filter(Class_abundtax, Class=="Alphaproteobacteria" | Class=="Bacilli" | 
        aes(x=StateEnviron, y=abund)) +
   geom_boxplot(width=0.9)+
   geom_jitter(aes(color=Class), size=0.5, shape=16)+
-  stat_compare_means(test="kruskal.test", label = "p.signif", symnum.args = symnum.args, comparisons=CHA0_comparisons) +
   xlab("") + ylab("ASVs normalized relative abundance (%)")+
   ggtitle("Class abundance", subtitle = "significance: Kruskal test")+
   scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))+
   annotation_logticks(sides = "l") +
-  #stat_summary(fun.data = stat_box_data, geom = "text", size=2, hjust = 0.5, vjust = 0.9, aes(y=0.001)) +
   facet_wrap(~Class, nrow = 1)+
   theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
+
+#And calculate stats
+Class_abundtax_top = filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
+                Class!="Clostridia" & Class!="Longimicrobia" &
+                Class!="Coriobacteriia" &
+                Class!="Deinococci" &
+                Class!="Myxococcia" &
+                Class!="Negativicutes" &
+                Class!="Thermoanaerobacteria")
+
+#Store results
+anovaClassres = data.frame()
+
+for (i in unique(Class_abundtax_top$Class)){
+  class_filt = filter(Class_abundtax_top, Class==i)
+  kw = agricolae::kruskal(class_filt$abund, class_filt$StateEnviron, p.adj = "BH")
+  kwres = rownames_to_column(kw$groups, var="StateEnviron")
+  classp = ggplot(class_filt, aes(x=StateEnviron, y=abund))+
+    geom_boxplot(width=0.9)+
+    geom_jitter(aes(color=Class), size=0.5, shape=16)+
+    annotate(geom = "text", x=kwres$StateEnviron, y=30, label=kwres$groups)+
+    xlab("") + ylab("ASVs normalized relative abundance (%)")+
+    ggtitle("Class abundance", subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
+    scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x))+
+    annotation_logticks(sides = "l") +
+    facet_wrap(~Class, nrow = 1)+
+    theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
+  
+  plot(classp)
+  
+  #check effects of ComState, Environmet and Inoculant per class
+  modelClass  <- lm(class_filt$abund ~ class_filt$ComState * class_filt$Environment * class_filt$Inoculant, data = class_filt)
+  anovaClass = anova(modelClass) %>% rownames_to_column(var="variable")
+  anovaClass.all = cbind(i, anovaClass)
+  anovaClassres = rbind(anovaClassres, anovaClass.all)
+}
+
+write.table(anovaClassres, "anovaClass_results_variables.txt", quote = F, sep = "\t", row.names = F)
+```
+
+## 7.6 Differences in Gammaproteobacteria removing CHA0 counts
+
+P. protegens CHA0 would indeed inflate the gammaproteobacteria relative normalized abundance. If we remove the inoculant counts, would we observe differences in gammaproteobacteria?
+
+```{r}
+#Remove CHA0 after normalization
+ps2.css_noCHA0 = subset_taxa(ps2.css, Species!="protegens")
+ps2.css_noCHA0.prop = transform_sample_counts(ps2.css_noCHA0, function(x) {x/sum(x)*100})
+
+#Frist, merge taxa by Class!
+noCHA0_Class_glom = tax_glom(ps2.css_noCHA0.prop, taxrank = "Class")
+noCHA0_Class_abund = left_join(data.frame(sample_data(noCHA0_Class_glom)), 
+                               rownames_to_column(data.frame(otu_table(noCHA0_Class_glom)), "id_samples"), by=c("id_samples"))
+noCHA0_Class_abund$StateEnviron = paste0(noCHA0_Class_abund$ComState, "_", 
+                                         noCHA0_Class_abund$Environment, "_", 
+                                         noCHA0_Class_abund$Inoculant)
+noCHA0_Class_abund$Time = as.character(noCHA0_Class_abund$Time)
+noCHA0_Class_abund.melt = noCHA0_Class_abund %>% select(-Replicate, -RGBcol) %>% melt(value.name = "abund")
+noCHA0_Class_tax = as.data.frame(tax_table(noCHA0_Class_glom)) %>% rownames_to_column(var = "asvs")
+noCHA0_Class_abundtax = left_join(noCHA0_Class_abund.melt, noCHA0_Class_tax, by=c("variable"="asvs"))
+
+noCHA0_Class_abundtax_top = filter(noCHA0_Class_abundtax, Class=="Gammaproteobacteria")
+
+#Store results
+noCHA0_anovaClassres = data.frame()
+
+for (i in unique(noCHA0_Class_abundtax_top$Class)){
+  class_filt = filter(noCHA0_Class_abundtax_top, Class==i)
+  kw = agricolae::kruskal(class_filt$abund, class_filt$StateEnviron, p.adj = "BH")
+  kwres = rownames_to_column(kw$groups, var="StateEnviron")
+  classp = ggplot(class_filt, aes(x=StateEnviron, y=abund))+
+    geom_boxplot(width=0.9)+
+    geom_jitter(aes(color=Class), size=0.5, shape=16)+
+    annotate(geom = "text", x=kwres$StateEnviron, y=30, label=kwres$groups)+
+    xlab("") + ylab("ASVs normalized relative abundance (%)")+
+    ggtitle("Class abundance", subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
+    scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x))+
+    annotation_logticks(sides = "l") +
+    facet_wrap(~Class, nrow = 1)+
+    theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
+  
+  plot(classp)
+  
+  #check effects of ComState, Environmet and Inoculant per class
+  modelClass  <- lm(class_filt$abund ~ class_filt$ComState * class_filt$Environment * class_filt$Inoculant, data = class_filt)
+  anovaClass = anova(modelClass) %>% rownames_to_column(var="variable")
+  anovaClass.all = cbind(i, anovaClass)
+  anovaClassres = rbind(anovaClassres, anovaClass.all)
+}
 ```
 
 # 8. Plant growth promotion
