@@ -28,7 +28,15 @@ Garrido-Sanz, D., Čaušević, S., Vacheron, J. et al. Changes in structure and 
 ```{r, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(data.table)
+
+#install and load other packages
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("ggtree", "phyloseq", "Biostrings", "pals", "ggpubr", "picante", "ggh4x", "agricolae", "metagenomeSeq"))
+
 library(ggtree)
+
 library(phyloseq)
 library(Biostrings)
 library(pals)
@@ -173,8 +181,27 @@ ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
 For certain downstream analyses; for example to compare different abundances of taxa between samples, the counts needs to be normalized to account for different sampling efforts, exposures, baselines, etc. We will normalize the samples using the CSS (Cumulative Sum Scaling) introduced in [Paulson et al. 2013](https://doi.org/10.1038/nmeth.2658), where the offset of a sample is the cumulative sum of counts in that sample, up to a quantile determined in a data driven way. Calculates scaling factors as the cumulative sum of ASVs abundances up to a data-derived threshold.
 
 ```{r fig.width = 11, fig.height= 11,}
+#getting phyloseq_transform_css function from metagMisc
+phyloseq_transform_css <- function(physeq, norm = TRUE, log = TRUE, ...){
+
+  # require(metagenomeSeq)
+
+  MGS <- phyloseq::phyloseq_to_metagenomeSeq(physeq)
+
+  # get the normalized count matrix
+  otu_norm <- metagenomeSeq::MRcounts(MGS, norm = norm, log = log, ...)
+  # exportMat(datt.norm, file = "tmp.txt")    # norm = TRUE, log = TRUE
+  ## save sample statistics (sample scaling factor, quantile value, number of identified features and library size):
+  # exportStats(dattM.sf, file = "tmp_stats.txt")
+
+  # Substitue raw abundance to the css-normalized data
+  physeq.tr <- physeq
+  phyloseq::otu_table(physeq.tr) <- phyloseq::otu_table(otu_norm, taxa_are_rows = T)
+  return(physeq.tr)
+}
+
 #Ussing the CSS
-ps2.css = metagMisc::phyloseq_transform_css(ps2, norm = T, log = F)
+ps2.css = phyloseq_transform_css(ps2, norm = T, log = F)
 ps2.css = orient_taxa(ps2.css, "columns") #change taxa to columns
 #and the the TSS (proportion; relative abundance)
 ps2.css.prop = transform_sample_counts(ps2.css, function(x) {x/sum(x)*100})
