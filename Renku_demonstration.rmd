@@ -28,21 +28,18 @@ Garrido-Sanz, D., Čaušević, S., Vacheron, J. et al. Changes in structure and 
 ```{r, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(data.table)
+library(scales)
 
 #install and load other packages
 #if (!require("BiocManager", quietly = TRUE))
 #    install.packages("BiocManager")
 
-#BiocManager::install(c("phyloseq", "pals", "ggpubr", "ggh4x", "agricolae"), ask = FALSE)
+BiocManager::install(c("phyloseq", "pals", "ggpubr", "ggh4x", "agricolae"), ask = FALSE)
 
-library(ggtree)
 
 library(phyloseq)
-
 library(pals)
 library(ggpubr)
-library(scales)
-
 library(ggh4x)
 library(agricolae)
 ```
@@ -50,23 +47,51 @@ library(agricolae)
 and functions required:
 
 ```{r}
-#getting phyloseq_transform_css function from metagMisc
-phyloseq_transform_css <- function(physeq, norm = TRUE, log = TRUE, ...){
+#phyolosec CSS transformation
+# Base-R CSS-like normalization (taxa x samples matrix)
+css_like <- function(mat, norm = TRUE, log = TRUE, p = 0.75) {
+  mat <- as.matrix(mat)
+  storage.mode(mat) <- "double"
 
-  # require(metagenomeSeq)
+  if (!norm) {
+    out <- mat
+  } else {
+    sf <- apply(mat, 2, function(x) {
+      x <- x[is.finite(x) & x > 0]
+      if (!length(x)) return(NA_real_)
+      thr <- as.numeric(stats::quantile(x, probs = p, names = FALSE, na.rm = TRUE))
+      sum(x[x <= thr])
+    })
 
-  MGS <- phyloseq::phyloseq_to_metagenomeSeq(physeq)
+    ref <- stats::median(sf, na.rm = TRUE)
+    if (!is.finite(ref) || ref <= 0) ref <- 1
 
-  # get the normalized count matrix
-  otu_norm <- metagenomeSeq::MRcounts(MGS, norm = norm, log = log, ...)
-  # exportMat(datt.norm, file = "tmp.txt")    # norm = TRUE, log = TRUE
-  ## save sample statistics (sample scaling factor, quantile value, number of identified features and library size):
-  # exportStats(dattM.sf, file = "tmp_stats.txt")
+    out <- sweep(mat, 2, sf, "/")
+    out <- sweep(out, 2, ref, "*")
 
-  # Substitue raw abundance to the css-normalized data
+    bad <- !is.finite(sf) | sf <= 0
+    if (any(bad)) out[, bad] <- 0
+  }
+
+  if (log) out <- log2(out + 1)
+  out
+}
+
+phyloseq_transform_css <- function(physeq, norm = TRUE, log = TRUE, p = 0.75) {
+  otu <- phyloseq::otu_table(physeq)
+  tar <- phyloseq::taxa_are_rows(otu)
+
+  mat <- as(otu, "matrix")
+  if (!tar) mat <- t(mat)                 # make it taxa x samples
+
+  otu_norm <- css_like(mat, norm = norm, log = log, p = p)
+
+  # restore original orientation
+  if (!tar) otu_norm <- t(otu_norm)
+
   physeq.tr <- physeq
-  phyloseq::otu_table(physeq.tr) <- phyloseq::otu_table(otu_norm, taxa_are_rows = T)
-  return(physeq.tr)
+  phyloseq::otu_table(physeq.tr) <- phyloseq::otu_table(otu_norm, taxa_are_rows = tar)
+  physeq.tr
 }
 
 #orient_taxa from speedyseq
@@ -81,6 +106,7 @@ orient_taxa <- function(x, as) {
   }
   x
 }
+
 ```
 
 # 2. Load DADA2 results, phylogeny, and metadata
@@ -126,9 +152,11 @@ cntCHA0=filter_taxa(cntCHA0, function(x) sum(x) > 0, TRUE)
 cntCHA0= subset_taxa(cntCHA0, Genus=="Pseudomonas")
 otu_table(cntCHA0)
 tax_table(cntCHA0)
+```
+
+```{r}
 print(paste0("Pseudomonas protegens CHA0 ASV is: ", colnames(otu_table(cntCHA0)[1,1])))
 ```
-Therefore CHA0 is **ASV1148!**
 
 # 5. Phyloseq filtering and normalization
 
@@ -294,6 +322,17 @@ ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV4))) +
 ## 6.3 Differences at the Class level.
 
 ```{r warning=FALSE}
+#merge taxa by Class!
+Class_glom = tax_glom(ps2.css.prop, taxrank = "Class")
+
+Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(otu_table(Class_glom)), "id_samples"), by=c("id_samples"))
+Class_abund$StateEnviron = paste0(Class_abund$ComState, "_", Class_abund$Environment, "_", Class_abund$Inoculant)
+Class_abund$Time = as.character(Class_abund$Time)
+Class_abund.melt = Class_abund %>% select(-Replicate, -ng.uL) %>% reshape2::melt(value.name = "value")
+Class_tax = as.data.frame(tax_table(Class_glom)) %>% rownames_to_column(var = "asvs")
+Class_abundtax = left_join(Class_abund.melt, Class_tax, by=c("variable"="asvs"))
+head(Class_abundtax)
+
 #Define top classes:
 Class_abundtax_top = filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
                 Class!="Clostridia" & Class!="Longimicrobia" &
@@ -302,17 +341,6 @@ Class_abundtax_top = filter(Class_abundtax, Class!="Abditibacteria" & Class!="Ac
                 Class!="Myxococcia" &
                 Class!="Negativicutes" &
                 Class!="Thermoanaerobacteria")
-
-#merge taxa by Class!
-Class_glom = tax_glom(ps2.css.prop, taxrank = "Class")
-
-Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(otu_table(Class_glom)), "id_samples"), by=c("id_samples"))
-Class_abund$StateEnviron = paste0(Class_abund$ComState, "_", Class_abund$Environment, "_", Class_abund$Inoculant)
-Class_abund$Time = as.character(Class_abund$Time)
-Class_abund.melt = Class_abund %>% select(-Replicate, -ng.uL) %>% reshape::melt(value.name = "value")
-Class_tax = as.data.frame(tax_table(Class_glom)) %>% rownames_to_column(var = "asvs")
-Class_abundtax = left_join(Class_abund.melt, Class_tax, by=c("variable"="asvs"))
-head(Class_abundtax)
 
 #Plot all, stored in the classp list of plots
 classp = list()
@@ -566,8 +594,8 @@ set.seed(1234)
 #Growing
 ps2.prop.grw = subset_samples(ps2.prop, ComState =="Growing")
 ord.nmds.bray.grw = ordinate(ps2.prop.grw, method="NMDS", distance="bray", k=2, trymax=500)
-stressplot(ord.nmds.bray.grw)
-scrs.bray.grw = scores(ord.nmds.bray.grw, display = 'sites')
+vegan::stressplot(ord.nmds.bray.grw)
+scrs.bray.grw = vegan::scores(ord.nmds.bray.grw, display = 'sites')
 scrs.bray.grw <- cbind(as.data.frame(scrs.bray.grw), 
                        Names_rep = ps2.prop.grw@sam_data$Names_rep, 
                        Names = ps2.prop.grw@sam_data$Names, 
@@ -592,8 +620,8 @@ grw = plot_ordination(ps2.prop.grw, ord.nmds.bray.grw, color="Names", title="Bra
 #Stable
 ps2.prop.stb = subset_samples(ps2.prop, ComState =="Stable")
 ord.nmds.bray.stb = ordinate(ps2.prop.stb, method="NMDS", distance="bray", k=2, trymax=500)
-stressplot(ord.nmds.bray.stb)
-scrs.bray.stb = scores(ord.nmds.bray.stb, display = 'sites')
+vegan::stressplot(ord.nmds.bray.stb)
+scrs.bray.stb = vegan::scores(ord.nmds.bray.stb, display = 'sites')
 scrs.bray.stb <- cbind(as.data.frame(scrs.bray.stb), 
                        Names_rep = ps2.prop.stb@sam_data$Names_rep, 
                        Names = ps2.prop.stb@sam_data$Names, 
@@ -751,7 +779,7 @@ bray.rep=phyloseq::distance(ps2.prop, method="bray")
 sampledf = data.frame(sample_data(ps2.prop))
 
 set.seed(1234)
-permutest(betadisper(bray.rep, sampledf$Names))
+vegan::permutest(vegan::betadisper(bray.rep, sampledf$Names))
 ```
 
 Our data is in the limit of being homogeneously dispersed. ANOVA is generally robust to violations of the assumption (homogeneity) as long as group sizes are equal. Group sizes are indeed equal. Therefore we will use PERMANOVA (permutational multivariate ANOVA (analysis of variance) and also kruskal in case there are discrepancies.
@@ -760,7 +788,7 @@ Our data is in the limit of being homogeneously dispersed. ANOVA is generally ro
 
 ```{r}
 #Are grow/Stable are different?
-adonis2(formula = bray.rep ~ ps2.prop@sam_data$ComState, data = sampledf, permutations = 9999)
+vegan::adonis2(formula = bray.rep ~ ps2.prop@sam_data$ComState, data = sampledf, permutations = 9999)
 kruskal.test(ps2.prop@sam_data$ComState ~ ps2.prop@sam_data$Names, data=as.matrix(bray.rep))
 ```
 
@@ -779,10 +807,10 @@ bray.stb=phyloseq::distance(ps2.prop.stb, method="bray")
 sampledf.stb = data.frame(sample_data(ps2.prop.stb))
 
 #Are Bulk / Rhizosphere different in growing?
-adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
+vegan::adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
 kruskal.test(ps2.prop.grw@sam_data$Environment ~ ps2.prop.grw@sam_data$Names, data=as.matrix(bray.grw))
 #Are inoculated no inoculated different in Stable?
-adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
+vegan::adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
 kruskal.test(ps2.prop.stb@sam_data$Environment ~ ps2.prop.stb@sam_data$Names, data=as.matrix(bray.stb))
 ```
 
@@ -794,13 +822,31 @@ Are there differences between inoculated or non-inoculated within each community
 
 ```{r}
 #Are inoculated no inoculated different in GROWING?
-adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Inoculant * ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
+vegan::adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Inoculant * ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
 
 #Are inoculated no inoculated different in Stable?
-adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Inoculant * ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
+vegan::adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Inoculant * ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
 ```
 
 ## 8.3 Correlation of Bray-Curtis vs. time
+
+First transform the Bray-Curtis dissimilarity matrix among samples into long format; sample1 sample2 and value of Bray-Curtis. Remove diagonals and add the metadata per comparison
+
+```{r}
+bray.rep=phyloseq::distance(ps2.prop, method="bray")
+sampledf = data.frame(sample_data(ps2.prop))
+bray.rep.melt = melt(as.matrix(bray.rep))
+colnames(bray.rep.melt) = c("sample1", "sample2", "BC_diss")
+head(bray.rep.melt)
+
+bray.rep.info = bray.rep.melt %>% left_join(sampledf, by=c("sample1"="id_samples")) %>% 
+  left_join(sampledf, by=c("sample2"="id_samples"))
+
+#remove diagonals
+bray.rep.info = bray.rep.info %>% filter(sample1 != sample2) %>% select(-Replicate.x, -Replicate.y, -ng.uL.x, -ng.uL.y,
+                                                                        -Names_rep.x, -Names_rep.y)
+```
+
 
 ```{r )}
 library(ggpmisc)
@@ -881,7 +927,7 @@ for (k in seq_along(toptax.css.Pseudo)){
   kwres = rownames_to_column(kw$groups, var="StateEnviron")
   
   plots_ps[[i]] = ggplot(df, aes(x=Names, y=value)) +
-  geom_segment(aes(y = value, yend = 0), stat = "summary", 
+  geom_segment(aes(y = value, yend = 0, xend=Names), stat = "summary", 
                position = "identity", width = 0.7, fun = mean, 
                size = 15, color = cols[(k-1) %% length(cols) + 1])+
   geom_jitter(shape=16, width = 0.2)+
@@ -900,3 +946,5 @@ for (k in seq_along(toptax.css.Pseudo)){
 plots_ps
 
 ```
+
+
