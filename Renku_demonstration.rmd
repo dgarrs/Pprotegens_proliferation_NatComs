@@ -16,8 +16,7 @@ pkgdown:
 This is a modification of the code and data analyses from: https://github.com/dgarrs/Pprotegens_proliferation_NatComs
 This is intended for being executed on a (Renku)[https://renkulab.io/] session.
 
-Only the following data analyses are included here:
-  1. 
+Only a few data analyses are included.
 
 For more details, see the original code and publication:
 Garrido-Sanz, D., Čaušević, S., Vacheron, J. et al. Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon establishment of a plant-beneficial Pseudomonas in the wheat rhizosphere. Microbiome 11, 214 (2023). https://doi.org/10.1186/s40168-023-01660-5
