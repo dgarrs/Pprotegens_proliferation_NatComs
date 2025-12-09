@@ -13,53 +13,43 @@ pkgdown:
   as_is: true
 ---
 
-After DADA2 pipeline is done, proceed with the data analysis.
+This is a modification of the code and data analyses from: https://github.com/dgarrs/Pprotegens_proliferation_NatComs
+This is intended for being executed on a (Renku)[https://renkulab.io/] session.
 
-# 1 Diversity Analyses: Load required packages
+Only the following data analyses are included here:
+  1. 
+
+For more details, see the original code and publication:
+Garrido-Sanz, D., Čaušević, S., Vacheron, J. et al. Changes in structure and assembly of a species-rich soil natural community with contrasting nutrient availability upon establishment of a plant-beneficial Pseudomonas in the wheat rhizosphere. Microbiome 11, 214 (2023). https://doi.org/10.1186/s40168-023-01660-5
+
+
+
+# 1. Load required packages
 
 ```{r, warning=FALSE, message=FALSE}
-library(dada2)
+library(tidyverse)
+library(data.table)
+library(ggtree)
 library(phyloseq)
 library(Biostrings)
-library(ggplot2)
-library(ggh4x)
-library(tidyverse)
-library(ggrepel)
-library(qiime2R)
-library(picante)
-library(dplyr)
-library(DESeq2)
 library(pals)
-library(vegan)
-library(speedyseq)
-library(ggforce)
-library(gridExtra)
-library(data.table)
 library(ggpubr)
-library(DECIPHER)
-library(phangorn)
-library(ggtree)
-library(plotly)
-library(phyloseq.extended)
 library(scales)
-library(ComplexHeatmap)
-library(iCAMP)
-library(metagMisc)
-library(SpiecEasi)
-library(igraph)
-library(ggnetwork)
+library(picante)
+library(ggh4x)
+library(agricolae)
 ```
 
-# 2. Load DADA2 results and phylogeny
+# 2. Load DADA2 results, phylogeny, and metadata
 
 ```{r}
-taxa2 = read.table(file="Taxonomy_assign/Taxtable_dada2.txt", sep=";", header=T)
+taxa2 = read.table(file="Taxtable_dada2.txt", sep=";", header=T)
 taxa2 = column_to_rownames(as.data.frame(taxa2), "X")
-seqtab.nochim2 = read.table(file="Taxonomy_assign/ASV_sequences.txt", sep=";", header=T)
-seqtab.nochim2 = column_to_rownames(as.data.frame(seqtab.nochim2), "X")
+#seqtab.nochim2 = read.table(file="ASV_sequences.txt", sep=";", header=T)
+seqtab.nochim2 = fread(file="ASV_sequences.txt", sep=";", header=T) #fastes
+seqtab.nochim2 = column_to_rownames(as.data.frame(seqtab.nochim2), "V1") #V1 if fread used, X if read.table
 rownames(seqtab.nochim2) = gsub("_$", "", rownames(seqtab.nochim2))
 ```
-
 
 ```{r}
 tree = read.tree("seqtab.nochim_aln.fasta.contree")
@@ -72,15 +62,13 @@ tree$tip.label = tip_tax$seqs
 ```
 
 
-# 3. Load metadata file
-
 ```{r}
 metadata = read.table("metadata.txt", header = T, sep = "\t")
 rownames(metadata) = metadata$id_samples
 head(metadata)
 ```
 
-# 4. Create the phyloseq object
+# 3. Create the phyloseq object
 
 ```{r, warnings = FALSE, error = FALSE, message = FALSE}
 ps <- phyloseq(otu_table(seqtab.nochim2, taxa_are_rows=F), 
@@ -100,8 +88,7 @@ ps
 #write.table(refseq(ps), "ref-seq_ps.txt", sep = "\t", quote = F, col.names = F)
 ```
 
-
-# 5. Identify *P. protegens* CHA0 ASV
+# 4. Identify *P. protegens* CHA0 ASV
 
 We will use the control; only inoculated with CHA0
 
@@ -113,12 +100,11 @@ otu_table(cntCHA0)
 tax_table(cntCHA0)
 print(paste0("Pseudomonas protegens CHA0 ASV is: ", colnames(otu_table(cntCHA0)[1,1])))
 ```
-
 Therefore CHA0 is **ASV1148!**
 
-# 6. Phyloseq object filtering
+# 5. Phyloseq filtering and normalization
 
-## 6.1 Remove Mitochondria and Chloroplasts and the control used for identify CHA0 ASV.
+## 5.1 Remove Mitochondria and Chloroplasts and the control used for identify CHA0 ASV.
 
 ```{r, warnings = FALSE, error = FALSE}
 #Filter out mitochondria and chloroplasts
@@ -129,8 +115,7 @@ ps = subset_samples(ps, ComState !="Control")
 ps
 ```
 
-
-## 6.2 Prevalence filtering
+## 5.2 Prevalence filtering
 
 Adapted from: [Bioconductor Workflow for Microbiome Data Analysis: from raw reads to community analyses](https://f1000research.com/articles/5-1492/v2)
 
@@ -184,98 +169,69 @@ ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
 ```
 
 
-# 7. Bar plots and differences:
-
-```{r}
-#Showing individual replicates. Top 100 taxa
-toptax = names(sort(taxa_sums(ps2), decreasing=TRUE))[1:100]
-ps.toptax = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
-ps.toptax <- prune_taxa(toptax, ps.toptax)
-
-#Class level
-plot_bar(ps.toptax, x="Names_rep", fill="Class")+
-  geom_bar(aes(fill=Class), stat="identity", position="stack")+
-  scale_fill_manual(values=ocean.balance(11))+
-  xlab("") + ylab("Relative abundance (%)") +
-  facet_wrap(~ComState+Environment+Inoculant, scales="free_x", ncol = 4) + ggtitle("Class, top 100") +
-  theme_pubclean() + theme(legend.position="right", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
-```
-
-
-## 7.1 Barplot of relative abundance of *P. protegens*  CHA0
-
-
-```{r}
-ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
-#Filter tax table for ASV1148 == species "protegens"
-ps2.propCHA0 = subset_taxa(ps2.prop, Species=="protegens")
-
-plot_bar(ps2.propCHA0, x="Names_rep", fill="Species")+
-  geom_bar(aes(fill=Species), stat="identity", position="stack")+
-  scale_fill_manual(values="#00cc74")+
-  xlab("") + ylab("Relative abundance (%)") +
-  facet_wrap(~ComState+Environment+Inoculant, scales="free_x", ncol = 4) + ggtitle("Class, top 100") +
-  theme_pubclean() + theme(legend.position="right", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
-
-```
-
-
-## 7.2 Export Taxa and ASVs table
-
-It also would be nice to export the tax_table and otu_table of at the level of Genus for description
-
-```{r}
-ps2.prop.tax = tax_table(ps2.prop) %>% as.data.frame() %>% rownames_to_column("ASVs")
-ps2.prop.asv = t(otu_table(ps2.prop)) %>% as.data.frame() 
-colnames(ps2.prop.asv) = sample_data(ps2.prop)$Names_rep
-ps2.prop.asv =  rownames_to_column(ps2.prop.asv, "ASVs")
-
-#write.table(left_join(ps2.prop.tax, ps2.prop.asv, by="ASVs"), "Tax_ASV_table.txt", quote = F, sep = "\t", row.names = F)
-```
-
-
-# 7.3 Normalization
+## 5.3 Normalization
 
 For certain downstream analyses; for example to compare different abundances of taxa between samples, the counts needs to be normalized to account for different sampling efforts, exposures, baselines, etc. We will normalize the samples using the CSS (Cumulative Sum Scaling) introduced in [Paulson et al. 2013](https://doi.org/10.1038/nmeth.2658), where the offset of a sample is the cumulative sum of counts in that sample, up to a quantile determined in a data driven way. Calculates scaling factors as the cumulative sum of ASVs abundances up to a data-derived threshold.
 
 ```{r fig.width = 11, fig.height= 11,}
 #Ussing the CSS
 ps2.css = metagMisc::phyloseq_transform_css(ps2, norm = T, log = F)
-ps2.css = orient_taxa(ps2.clr, "columns") #change taxa to columns
+ps2.css = orient_taxa(ps2.css, "columns") #change taxa to columns
 #and the the TSS (proportion; relative abundance)
-ps2.css.prop = transform_sample_counts(ps2.clr, function(x) {x/sum(x)*100})
+ps2.css.prop = transform_sample_counts(ps2.css, function(x) {x/sum(x)*100})
+```
 
-plot_bar(prune_taxa(toptax, ps2.css.prop), x="Names_rep", fill="Class")+
+# 6. Barplots
+
+Using normalized relative abundances
+
+```{r}
+#Represent only the top 100 ASVs
+toptax = names(sort(taxa_sums(ps2.css), decreasing=TRUE))[1:100]
+ps.toptax = transform_sample_counts(ps2.css, function(x) {x/sum(x)*100})
+ps.toptax <- prune_taxa(toptax, ps.toptax)
+
+#Plot at the class level
+plot_bar(prune_taxa(toptax, ps2.css.prop), x="id_samples", fill="Class")+
   geom_bar(aes(fill=Class), stat="identity", position="stack")+
   scale_fill_manual(values=ocean.balance(11))+
-  xlab("") + ylab("Relative abundance (%)") +
+  xlab("") + ylab("Normalized relative abundance (%)") +
   facet_wrap(~ComState+Environment+Inoculant, scales="free_x", ncol = 4) + ggtitle("Class, top 100") +
-  theme_pubclean() + theme(legend.position="right", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+  theme_pubclean() + theme(legend.position="right", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
 
-## 7.4 Differences in CSS-normalized relative abundance of CHA0 ASV
+## 6.1 Barplot of relative abundance of *P. protegens*  CHA0
+
+
+```{r}
+#Filter norm tax table for ASV1148 == species "protegens"
+ps2.propCHA0 = subset_taxa(ps2.css.prop, Species=="protegens")
+
+plot_bar(ps2.propCHA0, x="id_samples", fill="Species")+
+  geom_bar(aes(fill=Species), stat="identity", position="stack")+
+  scale_fill_manual(values="#00cc74")+
+  xlab("") + ylab("Relative abundance (%)") +
+  facet_wrap(~ComState+Environment+Inoculant, scales="free_x", ncol = 4) + ggtitle("Class, top 100") +
+  theme_pubclean() + 
+  theme(legend.position="right", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+```
+
+## 6.2 Differences in CSS-normalized relative abundance of CHA0 ASV
 
 ```{r}
 #Subset for CHA0 with the CSS
 ps2.propCHA0 = subset_taxa(ps2.css.prop, Species=="protegens")
-CHA0_abund = left_join(data.frame(sample_data(ps2.propCHA0)), rownames_to_column(data.frame(otu_table(ps2.propCHA0)), "id_samples"), by=c("id_samples"))
+CHA0_abund = left_join(data.frame(sample_data(ps2.propCHA0)), rownames_to_column(data.frame(t(otu_table(ps2.propCHA0))), "id_samples"), by=c("id_samples"))
+
 CHA0_abund$StateEnviron = paste0(CHA0_abund$ComState, "_", CHA0_abund$Environment, "_", CHA0_abund$Inoculant)
 
-#generate comparisons for statistics
-CHA0_comparisons = list(c("Growing_Bulk_CHA0", "Growing_Bulk_noCHA0"),c("Growing_Rhiz_CHA0", "Growing_Rhiz_noCHA0"),
-                        c("Stable_Bulk_CHA0", "Stable_Bulk_noCHA0"),c("Stable_Rhiz_CHA0", "Stable_Rhiz_noCHA0"),
-                        
-                        c("Growing_Bulk_CHA0", "Growing_Rhiz_CHA0"), 
-                        c("Growing_Bulk_CHA0", "Stable_Bulk_CHA0"),
-                        c("Growing_Rhiz_CHA0", "Stable_Rhiz_CHA0"),
-                        c("Stable_Bulk_CHA0", "Stable_Rhiz_CHA0"),
-                        
-                        c("Growing_Bulk_noCHA0", "Growing_Rhiz_noCHA0"), 
-                        c("Growing_Bulk_noCHA0", "Stable_Bulk_noCHA0"),
-                        c("Growing_Rhiz_noCHA0", "Stable_Rhiz_noCHA0"),
-                        c("Stable_Bulk_noCHA0", "Stable_Rhiz_noCHA0"))
-symnum.args = list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("p < 0.0001", "p < 0.001", "p < 0.01", "p < 0.05", "n. s."))
+#stats
+kw = agricolae::kruskal(CHA0_abund$ASV1148, CHA0_abund$StateEnviron, p.adj = "BH")
+kwres = rownames_to_column(kw$groups, var="StateEnviron")
+
 
 #Function to calculate number of observations
 stat_box_data <- function(y, upper_limit = max(log(CHA0_abund$ASV1148)) -max(log(CHA0_abund$ASV1148))*1.75) {
@@ -290,11 +246,12 @@ stat_box_data <- function(y, upper_limit = max(log(CHA0_abund$ASV1148)) -max(log
 
 ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV1148))) +
   geom_boxplot() +
-  geom_jitter(color="#00cc74", alpha=0.25, size=2, shape=16)+
-  stat_compare_means(test="kruskal.test", label = "p.signif", symnum.args = symnum.args, comparisons=CHA0_comparisons) +
+  geom_jitter(color="#00cc74", size=2, shape=16)+
   xlab("") + ylab("Normalized P. protegens ASV relative abundance (%)")+
-  ggtitle("CHA0 abundance", subtitle = "significance: Kruskal test")+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x))) +
+  annotate(geom = "text", x=kwres$StateEnviron, y=45, label=kwres$groups)+
+    ggtitle("Class abundance", subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), 
+                labels = trans_format("log10", math_format(10^.x))) +
   annotation_logticks(sides = "l") +
   stat_summary(
     fun.data = stat_box_data, 
@@ -306,72 +263,31 @@ ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV1148))) +
 ```
 
 
-## 7.5 Differences at the Class level.
+## 6.3 Differences at the Class level.
 
 ```{r warning=FALSE}
 #merge taxa by Class!
 Class_glom = tax_glom(ps2.css.prop, taxrank = "Class")
 
-Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(otu_table(Class_glom)), "id_samples"), by=c("id_samples"))
+Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(t(otu_table(Class_glom))), "id_samples"), by=c("id_samples"))
 Class_abund$StateEnviron = paste0(Class_abund$ComState, "_", Class_abund$Environment, "_", Class_abund$Inoculant)
 Class_abund$Time = as.character(Class_abund$Time)
-Class_abund.melt = Class_abund %>% select(-Replicate, -RGBcol) %>% melt(value.name = "abund")
+Class_abund.melt = Class_abund %>% select(-Replicate, -ng.uL) %>% reshape::melt(value.name = "value")
 Class_tax = as.data.frame(tax_table(Class_glom)) %>% rownames_to_column(var = "asvs")
 Class_abundtax = left_join(Class_abund.melt, Class_tax, by=c("variable"="asvs"))
 head(Class_abundtax)
 
-#Are there different at the Community state level? - in all of them?
-#Remove very low abundant clases
-ggplot(filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
-                Class!="Clostridia" & Class!="Longimicrobia" &
-                Class!="Coriobacteriia" &
-                Class!="Deinococci" &
-                Class!="Myxococcia" &
-                Class!="Negativicutes" &
-                Class!="Thermoanaerobacteria"),
-       aes(x=StateEnviron, y=abund)) +
-  geom_boxplot(width=0.9)+
-  geom_jitter(aes(color=Class), size=0.5, shape=16)+
-  xlab("") + ylab("ASVs normalized relative abundance (%)")+
-  ggtitle("Class abundance", subtitle = "significance: Kruskal test")+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))+
-  annotation_logticks(sides = "l") +
-  stat_summary(fun.data = stat_box_data, geom = "text", size=2, hjust = 0.5, vjust = 0.9, aes(y=0.00001)) +
-  facet_wrap(~Class, nrow = 1)+
-  theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
-
-#Represent only Alpha, Bacilly and Gamma, which are the most notorious ones
-ggplot(filter(Class_abundtax, Class=="Alphaproteobacteria" | Class=="Bacilli" | Class=="Gammaproteobacteria"),
-       aes(x=StateEnviron, y=abund)) +
-  geom_boxplot(width=0.9)+
-  geom_jitter(aes(color=Class), size=0.5, shape=16)+
-  xlab("") + ylab("ASVs normalized relative abundance (%)")+
-  ggtitle("Class abundance", subtitle = "significance: Kruskal test")+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))+
-  annotation_logticks(sides = "l") +
-  facet_wrap(~Class, nrow = 1)+
-  theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
-
-#And calculate stats
-Class_abundtax_top = filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
-                Class!="Clostridia" & Class!="Longimicrobia" &
-                Class!="Coriobacteriia" &
-                Class!="Deinococci" &
-                Class!="Myxococcia" &
-                Class!="Negativicutes" &
-                Class!="Thermoanaerobacteria")
-
-#Store results
-anovaClassres = data.frame()
+#Plot all, stored in the classp list of plots
+classp = list()
 
 for (i in unique(Class_abundtax_top$Class)){
   class_filt = filter(Class_abundtax_top, Class==i)
-  kw = agricolae::kruskal(class_filt$abund, class_filt$StateEnviron, p.adj = "BH")
+  kw = agricolae::kruskal(class_filt$value, class_filt$StateEnviron, p.adj = "BH")
   kwres = rownames_to_column(kw$groups, var="StateEnviron")
-  classp = ggplot(class_filt, aes(x=StateEnviron, y=abund))+
+  classp[[i]] = ggplot(class_filt, aes(x=StateEnviron, y=value))+
     geom_boxplot(width=0.9)+
-    geom_jitter(aes(color=Class), size=0.5, shape=16)+
-    annotate(geom = "text", x=kwres$StateEnviron, y=30, label=kwres$groups)+
+    geom_jitter(aes(color=Class), size=0.75, shape=16)+
+    annotate(geom = "text", x=kwres$StateEnviron, y= max(class_filt$value)*1.2, label=kwres$groups)+
     xlab("") + ylab("ASVs normalized relative abundance (%)")+
     ggtitle("Class abundance", subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
     scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x))+
@@ -379,19 +295,14 @@ for (i in unique(Class_abundtax_top$Class)){
     facet_wrap(~Class, nrow = 1)+
     theme_pubclean() + theme(axis.text.x = element_text(angle = 90, vjust =1, hjust=1))
   
-  plot(classp)
-  
-  #check effects of ComState, Environmet and Inoculant per class
-  modelClass  <- lm(class_filt$abund ~ class_filt$ComState * class_filt$Environment * class_filt$Inoculant, data = class_filt)
-  anovaClass = anova(modelClass) %>% rownames_to_column(var="variable")
-  anovaClass.all = cbind(i, anovaClass)
-  anovaClassres = rbind(anovaClassres, anovaClass.all)
 }
 
-write.table(anovaClassres, "anovaClass_results_variables.txt", quote = F, sep = "\t", row.names = F)
+classp$Alphaproteobacteria
+classp$Bacilli
+classp$Gammaproteobacteria
 ```
 
-## 7.6 Differences in Gammaproteobacteria removing CHA0 counts
+## 6.4 Differences in Gammaproteobacteria removing CHA0 counts
 
 P. protegens CHA0 would indeed inflate the gammaproteobacteria relative normalized abundance. If we remove the inoculant counts, would we observe differences in gammaproteobacteria?
 
@@ -403,19 +314,18 @@ ps2.css_noCHA0.prop = transform_sample_counts(ps2.css_noCHA0, function(x) {x/sum
 #Frist, merge taxa by Class!
 noCHA0_Class_glom = tax_glom(ps2.css_noCHA0.prop, taxrank = "Class")
 noCHA0_Class_abund = left_join(data.frame(sample_data(noCHA0_Class_glom)), 
-                               rownames_to_column(data.frame(otu_table(noCHA0_Class_glom)), "id_samples"), by=c("id_samples"))
+                               rownames_to_column(data.frame(t(otu_table(noCHA0_Class_glom))), "id_samples"), by=c("id_samples"))
 noCHA0_Class_abund$StateEnviron = paste0(noCHA0_Class_abund$ComState, "_", 
                                          noCHA0_Class_abund$Environment, "_", 
                                          noCHA0_Class_abund$Inoculant)
 noCHA0_Class_abund$Time = as.character(noCHA0_Class_abund$Time)
-noCHA0_Class_abund.melt = noCHA0_Class_abund %>% select(-Replicate, -RGBcol) %>% melt(value.name = "abund")
+noCHA0_Class_abund.melt = noCHA0_Class_abund %>% select(-Replicate, -ng.uL) %>% reshape2::melt(value.name = "abund")
 noCHA0_Class_tax = as.data.frame(tax_table(noCHA0_Class_glom)) %>% rownames_to_column(var = "asvs")
 noCHA0_Class_abundtax = left_join(noCHA0_Class_abund.melt, noCHA0_Class_tax, by=c("variable"="asvs"))
 
 noCHA0_Class_abundtax_top = filter(noCHA0_Class_abundtax, Class=="Gammaproteobacteria")
 
 #Store results
-noCHA0_anovaClassres = data.frame()
 
 for (i in unique(noCHA0_Class_abundtax_top$Class)){
   class_filt = filter(noCHA0_Class_abundtax_top, Class==i)
@@ -434,65 +344,15 @@ for (i in unique(noCHA0_Class_abundtax_top$Class)){
   
   plot(classp)
   
-  #check effects of ComState, Environmet and Inoculant per class
-  modelClass  <- lm(class_filt$abund ~ class_filt$ComState * class_filt$Environment * class_filt$Inoculant, data = class_filt)
-  anovaClass = anova(modelClass) %>% rownames_to_column(var="variable")
-  anovaClass.all = cbind(i, anovaClass)
-  anovaClassres = rbind(anovaClassres, anovaClass.all)
 }
-```
 
-# 8. Plant growth promotion
 
-```{r}
-plant_growth = read.table("plant_growth/plant_growth_raw.txt", header = T, sep = "\t")
-plant_growth = metadata %>% select(-ComState, - Inoculant, - Environment, -Time, -Names_rep, -Replicate, -RGBcol) %>% left_join(plant_growth, by=c("id_samples"))
-plant_growth = melt(plant_growth)
-head(plant_growth)
 ```
 
 
-```{r}
-CHA0_comparisons2 = list(c("Growing_5_Rhiz_CHA0", "Growing_5_Rhiz_noCHA0"),
-                         c("Growing_7_Rhiz_CHA0", "Growing_7_Rhiz_noCHA0"),
-                         c("Growing_9_Rhiz_CHA0", "Growing_9_Rhiz_noCHA0"),
-                        c("Stable_5_Rhiz_CHA0", "Stable_5_Rhiz_noCHA0"),
-                        c("Stable_7_Rhiz_CHA0", "Stable_7_Rhiz_noCHA0"),
-                        c("Stable_9_Rhiz_CHA0", "Stable_9_Rhiz_noCHA0"))
+# 7. Diversity
 
-ggplot(filter(plant_growth, value!="NA"), aes(x=Names, y=value)) + 
-  geom_bar(position = "identity", stat = "summary", fill="darkgrey") + 
-  ggtitle("Plant_growth")+
-  geom_errorbar(stat="summary", width=0.5)+
-  geom_jitter(shape=16, width = 0.2) +
-  stat_compare_means(test="wilcox.test", label = "p.format", comparisons=CHA0_comparisons2) +
-  theme_pubclean() + 
-  facet_wrap(~variable, scales = "free", ncol = 5)+
-  theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-```
-
-# 9. Rarefaction Curves
-
-Adapted from: https://github.com/joey711/phyloseq/issues/143
-
-```{r, message=FALSE, warning=FALSE, results = FALSE}
-#calculate rarefaction curves using 1000 step size and calculating the standard error
-rare = ggrare(ps2, step = 1000, color = "Names", label = "Names_rep", se = T, parallel = T, plot = F)
-```
-
-```{r}
-rare=rare + scale_color_manual(values=c("#dbd8bf", "#d8bfdc", "#f5edc7", "#f498c1", "#c8e8e4", "#d9daea", "#e0d085", "#ea519d", "#80cdc1", "#b2abd2", "#be9736", "#d42e92", "#35978f", "#8074ad", "#c39fcb", "#ddbfb8", "#fce0ec", "#fddbc7", "#e6f1d0", "#d1e5ef", "#edb5d3", "#f4a582", "#b9d987", "#93c5de", "#dd77ae", "#d6604d", "#80bc42", "#4393c3", "red")) +
-  scale_fill_manual(values=c("#dbd8bf", "#d8bfdc", "#f5edc7", "#f498c1", "#c8e8e4", "#d9daea", "#e0d085", "#ea519d", "#80cdc1", "#b2abd2", "#be9736", "#d42e92", "#35978f", "#8074ad", "#c39fcb", "#ddbfb8", "#fce0ec", "#fddbc7", "#e6f1d0", "#d1e5ef", "#edb5d3", "#f4a582", "#b9d987", "#93c5de", "#dd77ae", "#d6604d", "#80bc42", "#4393c3", "red")) +
-  scale_x_continuous(labels = comma) +
-  xlab("Sequencing depth (bp)") + ylab("Observed ASVs")+
-  facet_wrap(~ComState, scales = "free_x") + theme_pubr()
-
-ggplotly(rare)
-```
-
-# 10. Diversity
-
-## 10.1 Diversity indexes
+## 7.1 Diversity indexes
 
 Observed ASVs, Shannon index and Faith's phylogenetic diversity.
 
@@ -572,7 +432,7 @@ diversity_all = pd %>% dplyr::select(id_samples, Names, PD)  %>%
 
 ```
 
-## 10.2 Differences in diversity across comm. state, environments or inoculation
+## 7.2 Differences in diversity across comm. state, environments or inoculation
 
 ```{r }
 #Observed ASVs
@@ -698,42 +558,7 @@ pd_all = ggarrange(diver.pd.comstate,
 ggarrange(observed_all, shannon_all, pd_all, nrow = 3)
 ```
 
-
-## 10.3 Statistical differences of diversity indexes
-
-Extract the data frame with the calculated values:
-
-```{r}
-data.ob = diver.ob$data 
-data.sha = diver.sha$data 
-data.pd = pd
-
-#Let's test the homogeneity of the data:
-set.seed(1234)
-permutest(betadisper(dist(data.ob$value), data.ob$Names)) #NO! - no parametric! Wilcoxon rank test or Kruskal-Wallis
-permutest(betadisper(dist(data.sha$value), data.sha$Names)) #Yes - parametric ANOVA 
-permutest(betadisper(dist(data.pd$PD), data.pd$Names)) #Yes - parametric ANOVA 
-
-#Observed ASVs, gonna use Wruskal-Wallis, iwth dunn test correction
-library(rstatix)
-set.seed(1234)
-stat.ob = dunn_test(value ~ Names, data = data.ob, p.adjust.method = "fdr")
-
-#For Shannon and PD, parametric, using ANOVA with tukeis correction
-set.seed(1234)
-stat.sha = TukeyHSD(aov(value ~ Names,data=data.sha), ordered = T, p.adjust.method = "fdr")
-set.seed(1234)
-stat.pd = TukeyHSD(aov(PD ~ Names,data=data.pd), ordered = T, p.adjust.method = "fdr")
-
-#and save into files
-#write.table(stat.ob, "Stats_results/stats_observed_ASVs_dunn_test.txt", quote = F, sep = "\t")
-#write.table(stat.sha$Names, "Stats_results/stats_shannon_tukeys.txt", quote = F, sep = "\t")
-#write.table(stat.pd$Names, "Stats_results/stats_faithPD_tykeys.txt", quote = F, sep = "\t")
-```
-
-Unless we want to report an specific comparison (e.g., differences between the sampling 1 and the rest) there's no much more to do with this.
-
-## 10.4 Correlation of diversity vs. time
+## 7.3 Correlation of diversity vs. time
 
 
 ```{r }
@@ -774,94 +599,29 @@ ggplot(diver.ob$data, aes(x=as.numeric(Time), y=value, color=ComState, fill=ComS
 
 ```
 
-**NOTE** The R and p-value reported are for the Spearman correlation. The "lines" are generated by fitting a generalized additive model (gam) to the data. However, is not possible to retrieve the R^2 and p-value of this fitted model: meaning we cannot evaluate if the gam moddel really represent the data. It can be more or less determined by the "shadow", which represent a confidence interval of 95%, but nothing more.
 
-
-# 11. Bray-Curtis dissimilarity clustering
-
-```{r }
-ps.merged = merge_samples(ps2, "Names") #Merge replicates
-ps.merged.prop = transform_sample_counts(ps.merged, function(x) {x/sum(x)*100})
-bray.merged=as.data.frame(as.matrix(phyloseq::distance(ps.merged.prop, method="bray")))
-
-sampdata.merged = data.frame(sample_data(ps2)) %>% select(-id_samples, -Names_rep, -Replicate) %>% group_by(Names) %>% unique()
-sampdata.merged$id_samples = sampdata.merged$Names
-
-#Calculate ordering for columns and rows (for annotations of the matrix)
-clust.order = hclust(dist(bray.merged))
-#and merge with the sample_data to optaion the rest of the annotations in order
-clust.order = data.frame("Names"=clust.order$labels) %>% left_join(data.frame(sample_data(ps2)), by="Names") %>% 
-  select(-id_samples, -Names_rep, -Replicate) %>% 
-  group_by(Names) %>% 
-  unique()
-
-Heatmap(as.matrix(bray.merged), 
-        col = ocean.balance(100), column_dend_height = unit(3, "cm"), row_dend_width = unit(3, "cm"),
-        top_annotation = HeatmapAnnotation("Community state"=clust.order$ComState, 
-                                           "Environment"=clust.order$Environment, 
-                                           "Inoculant"=clust.order$Inoculant),
-        left_annotation = rowAnnotation("Community state"=clust.order$ComState, 
-                                        "Environment"=clust.order$Environment, 
-                                        "Inoculant"=clust.order$Inoculant),
-        width = ncol(bray.merged)*unit(5, "mm"), height = nrow(bray.merged)*unit(5, "mm"), column_km=2, row_km=2)
-
-```
-
-# 12. NMDS
-
-```{r }
-set.seed(1234)
-ord.nmds.bray = ordinate(transform_sample_counts(ps2, function(x) x/sum(x)), method="NMDS", distance="bray", k=2, trymax=200)
-stressplot(ord.nmds.bray)
-scrs.bray = scores(ord.nmds.bray, display = 'sites')
-scrs.bray <- cbind(as.data.frame(scrs.bray), 
-                   Names_rep = ps.prop@sam_data$Names_rep, 
-                   Names = ps.prop@sam_data$Names, 
-                   Inoculant = ps.prop@sam_data$Inoculant, 
-                   ComState = ps.prop@sam_data$ComState, 
-                   Env =ps.prop@sam_data$Environment,
-                   Time_Env = paste0(ps.prop@sam_data$Time, "_", ps.prop@sam_data$Environment))
-cen.bray = aggregate(cbind(NMDS1, NMDS2) ~ Names, data = scrs.bray, FUN = mean)
-segs.bray = merge(scrs.bray, setNames(cen.bray, c('Names', 'oNMDS1','oNMDS2')),
-              by = 'Names', sort = FALSE)
-
-p1 = plot_ordination(ps.prop, ord.nmds.bray, color="Names", title="Bray NMDS", ) + geom_point(alpha=0.1) +
-  geom_segment(data = segs.bray, mapping = aes(xend = oNMDS1, yend = oNMDS2), size=0.5, alpha=0.25) +
-  geom_point(data = cen.bray, size = 2) +
-  geom_hline(yintercept = 0, linetype="dashed", color="grey") +
-  geom_vline(xintercept = 0, linetype="dashed", color="grey") +
-  scale_color_manual(values=c("#dbd8bf", "#d8bfdc", "#f5edc7", "#f498c1", "#c8e8e4", "#d9daea", "#e0d085", "#ea519d", 
-                              "#80cdc1", "#b2abd2", "#be9736", "#d42e92", "#35978f", "#8074ad", "#c39fcb", "#ddbfb8", 
-                              "#fce0ec", "#fddbc7", "#e6f1d0", "#d1e5ef", "#edb5d3", "#f4a582", "#b9d987", "#93c5de", 
-                              "#dd77ae", "#d6604d", "#80bc42", "#4393c3"))+
-  annotate("text", size=3, y=-0.07, x=-0.25,
-           label = paste0("Stress: ", format(round(ord.nmds.bray$stress, 5))), hjust=0)+
-  theme_classic2()
-```
-
-
-## 12.1 Individual NMDS plots per Comunity State (growing/Stable)
+# 8. NMDS
 
 
 ```{r}
 set.seed(1234)
 #Individually NMDS by ComState
 #Growing
-ps.prop.grw = subset_samples(ps.prop, ComState =="Growing")
-ord.nmds.bray.grw = ordinate(ps.prop.grw, method="NMDS", distance="bray", k=2, trymax=500)
+ps2.prop.grw = subset_samples(ps2.prop, ComState =="Growing")
+ord.nmds.bray.grw = ordinate(ps2.prop.grw, method="NMDS", distance="bray", k=2, trymax=500)
 stressplot(ord.nmds.bray.grw)
 scrs.bray.grw = scores(ord.nmds.bray.grw, display = 'sites')
 scrs.bray.grw <- cbind(as.data.frame(scrs.bray.grw), 
-                       Names_rep = ps.prop.grw@sam_data$Names_rep, 
-                       Names = ps.prop.grw@sam_data$Names, 
-                       Inoculant = ps.prop.grw@sam_data$Inoculant, 
-                       ComState = ps.prop.grw@sam_data$ComState, 
-                       Env =ps.prop.grw@sam_data$Environment)
+                       Names_rep = ps2.prop.grw@sam_data$Names_rep, 
+                       Names = ps2.prop.grw@sam_data$Names, 
+                       Inoculant = ps2.prop.grw@sam_data$Inoculant, 
+                       ComState = ps2.prop.grw@sam_data$ComState, 
+                       Env =ps2.prop.grw@sam_data$Environment)
 cen.bray.grw = aggregate(cbind(NMDS1, NMDS2) ~ Names, data = scrs.bray.grw, FUN = mean)
 segs.bray.grw = merge(scrs.bray.grw, setNames(cen.bray.grw, c('Names', 'oNMDS1','oNMDS2')),
               by = 'Names', sort = FALSE)
 
-grw = plot_ordination(ps.prop.grw, ord.nmds.bray.grw, color="Names", title="Bray NMDS | Growing com.") +
+grw = plot_ordination(ps2.prop.grw, ord.nmds.bray.grw, color="Names", title="Bray NMDS | Growing com.") +
   geom_point(alpha=0.1) +
   geom_segment(data = segs.bray.grw, mapping = aes(xend = oNMDS1, yend = oNMDS2), size=0.6, alpha=0.25) +
   geom_point(data = cen.bray.grw, size = 3) +
@@ -873,21 +633,21 @@ grw = plot_ordination(ps.prop.grw, ord.nmds.bray.grw, color="Names", title="Bray
   theme_classic2() + theme(legend.position="bottom")
 
 #Stable
-ps.prop.stb = subset_samples(ps.prop, ComState =="Stable")
-ord.nmds.bray.stb = ordinate(ps.prop.stb, method="NMDS", distance="bray", k=2, trymax=500)
+ps2.prop.stb = subset_samples(ps2.prop, ComState =="Stable")
+ord.nmds.bray.stb = ordinate(ps2.prop.stb, method="NMDS", distance="bray", k=2, trymax=500)
 stressplot(ord.nmds.bray.stb)
 scrs.bray.stb = scores(ord.nmds.bray.stb, display = 'sites')
 scrs.bray.stb <- cbind(as.data.frame(scrs.bray.stb), 
-                       Names_rep = ps.prop.stb@sam_data$Names_rep, 
-                       Names = ps.prop.stb@sam_data$Names, 
-                       Inoculant = ps.prop.stb@sam_data$Inoculant, 
-                       ComState = ps.prop.stb@sam_data$ComState, 
-                       Env =ps.prop.stb@sam_data$Environment)
+                       Names_rep = ps2.prop.stb@sam_data$Names_rep, 
+                       Names = ps2.prop.stb@sam_data$Names, 
+                       Inoculant = ps2.prop.stb@sam_data$Inoculant, 
+                       ComState = ps2.prop.stb@sam_data$ComState, 
+                       Env =ps2.prop.stb@sam_data$Environment)
 cen.bray.stb = aggregate(cbind(NMDS1, NMDS2) ~ Names, data = scrs.bray.stb, FUN = mean)
 segs.bray.stb = merge(scrs.bray.stb, setNames(cen.bray.stb, c('Names', 'oNMDS1','oNMDS2')),
               by = 'Names', sort = FALSE)
 
-stb = plot_ordination(ps.prop.stb, ord.nmds.bray.stb, color="Names", title="Bray NMDS | Stable com.") +
+stb = plot_ordination(ps2.prop.stb, ord.nmds.bray.stb, color="Names", title="Bray NMDS | Stable com.") +
   geom_point(alpha=0.1) +
   geom_segment(data = segs.bray.stb, mapping = aes(xend = oNMDS1, yend = oNMDS2), size=0.6, alpha=0.25) +
   geom_point(data = cen.bray.stb, size = 3) +
@@ -897,6 +657,10 @@ stb = plot_ordination(ps.prop.stb, ord.nmds.bray.stb, color="Names", title="Bray
   annotate("text", size=3, y=-0.07, x=-0.25,
            label = paste0("Stress: ", format(round(ord.nmds.bray.stb$stress, 5))), hjust=0)+
   theme_classic2() + theme(legend.position="bottom")
+
+grw
+stb
+
 ```
 
 Calculate density graphs for the Stable/Growing conditions to better see differences:
@@ -952,10 +716,9 @@ stb.den.2 = ggplot(scrs.bray.stb, aes(y=NMDS2,color=Names, fill=Names)) +
                               "#b9d987", "#93c5de", "#dd77ae", "#d6604d",
                               "#80bc42", "#4393c3"))+
   theme_pubclean()+ theme(legend.position="none")
-```
 
 
-```{r}
+#And plot both
 ggarrange(ggarrange(stb.den.1+xlab("") +theme(axis.text.x=element_blank()) + theme_classic2(), 
                               NA, 
                               stb + theme(legend.position="none") + ggtitle("Stable"), 
@@ -964,8 +727,10 @@ ggarrange(ggarrange(stb.den.1+xlab("") +theme(axis.text.x=element_blank()) + the
                               heights = c(0.85, 2),
                               widths  = c(2, 0.85),
                               align = "hv", 
-                              common.legend = TRUE, legend = "right"),
-          ggarrange(grw.den.1+xlab("") +theme(axis.text.x=element_blank()) + theme_classic2(), 
+                              common.legend = TRUE, legend = "right"))
+
+
+ggarrange(ggarrange(grw.den.1+xlab("") +theme(axis.text.x=element_blank()) + theme_classic2(), 
                               NA, 
                               grw + theme(legend.position="none") + ggtitle("Growing"), 
                               grw.den.2+ylab("") +theme(axis.text.y=element_blank())+ theme_classic2(), 
@@ -973,18 +738,18 @@ ggarrange(ggarrange(stb.den.1+xlab("") +theme(axis.text.x=element_blank()) + the
                               heights = c(0.85, 2),
                               widths  = c(2, 0.85),
                               align = "hv", 
-                              common.legend = TRUE, legend = "right"),
-          ncol=1,nrow = 2,
-          common.legend = TRUE, legend="bottom",
-          labels = c("A", "B","C"))
+                              common.legend = TRUE, legend = "right"))
+
 ```
 
 
-## 12.2 Distance to the centroid
+
+
+## 8.1 Distance to the centroid
 
 ```{r}
 #Growing NatCom
-cenbeta.grw = vegan::betadisper(phyloseq::distance(ps.prop.grw, "bray"), 
+cenbeta.grw = vegan::betadisper(phyloseq::distance(ps2.prop.grw, "bray"), 
                             as.factor(scrs.bray.grw$Names), 
                             type = "centroid", sqrt.dist = F, bias.adjust = T)
 cenbeta.grw = as.data.frame(cenbeta.grw$distances)
@@ -1001,7 +766,7 @@ cen.dist.grw.plot = ggplot(cenbeta.grw, aes(x=Names, y=distances)) +
   theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 #Stable NatCom
-cenbeta.stb = vegan::betadisper(phyloseq::distance(ps.prop.stb, "bray"), 
+cenbeta.stb = vegan::betadisper(phyloseq::distance(ps2.prop.stb, "bray"), 
                             as.factor(scrs.bray.stb$Names), 
                             type = "centroid", sqrt.dist = F, bias.adjust = T)
 cenbeta.stb = as.data.frame(cenbeta.stb$distances)
@@ -1020,173 +785,65 @@ cen.dist.stb.plot = ggplot(cenbeta.stb, aes(x=Names, y=distances)) +
 ggarrange(cen.dist.grw.plot, cen.dist.stb.plot, nrow = 1)
 ```
 
-## 12.3 Bray-Curtis statistical differences
+## 8.2 Bray-Curtis statistical differences
 
 Test for homogeneity of the data
 
 ```{r}
-bray.rep=phyloseq::distance(ps.prop, method="bray")
-sampledf = data.frame(sample_data(ps.prop))
+bray.rep=phyloseq::distance(ps2.prop, method="bray")
+sampledf = data.frame(sample_data(ps2.prop))
 
 set.seed(1234)
 permutest(betadisper(bray.rep, sampledf$Names))
 ```
 
-Our data is in the limit of being homogeneously dispersed. ANOVA is generally robust to violations of the assumption (homogeneity) as long as group sizes are equal. Group sizes are indeed equal. Therefore we will use PERMANOVA (permutational multivariate ANOVA (analysis of variance) and also kruskal in case thre are discrepancies.
+Our data is in the limit of being homogeneously dispersed. ANOVA is generally robust to violations of the assumption (homogeneity) as long as group sizes are equal. Group sizes are indeed equal. Therefore we will use PERMANOVA (permutational multivariate ANOVA (analysis of variance) and also kruskal in case there are discrepancies.
 
-### 12.3.1 Growing vs. Stable communities?
+### 8.2.1 Growing vs. Stable communities?
 
 ```{r}
 #Are grow/Stable are different?
-adonis2(formula = bray.rep ~ ps.prop@sam_data$ComState, data = sampledf, permutations = 9999)
-kruskal.test(ps.prop@sam_data$ComState ~ ps.prop@sam_data$Names, data=as.matrix(bray.rep))
+adonis2(formula = bray.rep ~ ps2.prop@sam_data$ComState, data = sampledf, permutations = 9999)
+kruskal.test(ps2.prop@sam_data$ComState ~ ps2.prop@sam_data$Names, data=as.matrix(bray.rep))
 ```
 
 Yes, there are.
 
-### 12.3.2 Bulk vs. Rhizosphere
+### 8.2.2 Bulk vs. Rhizosphere
 
 
 ```{r}
 #Obtain bray-curtis distances of the growing community
-bray.grw=phyloseq::distance(ps.prop.grw, method="bray")
-sampledf.grw = data.frame(sample_data(ps.prop.grw))
+bray.grw=phyloseq::distance(ps2.prop.grw, method="bray")
+sampledf.grw = data.frame(sample_data(ps2.prop.grw))
 
 #Obtain bray-curtis distances of the Stable community
-bray.stb=phyloseq::distance(ps.prop.stb, method="bray")
-sampledf.stb = data.frame(sample_data(ps.prop.stb))
+bray.stb=phyloseq::distance(ps2.prop.stb, method="bray")
+sampledf.stb = data.frame(sample_data(ps2.prop.stb))
 
 #Are Bulk / Rhizosphere different in growing?
-adonis2(formula = bray.grw ~ ps.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
-kruskal.test(ps.prop.grw@sam_data$Environment ~ ps.prop.grw@sam_data$Names, data=as.matrix(bray.grw))
+adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
+kruskal.test(ps2.prop.grw@sam_data$Environment ~ ps2.prop.grw@sam_data$Names, data=as.matrix(bray.grw))
 #Are inoculated no inoculated different in Stable?
-adonis2(formula = bray.stb ~ ps.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
-kruskal.test(ps.prop.stb@sam_data$Environment ~ ps.prop.stb@sam_data$Names, data=as.matrix(bray.stb))
+adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
+kruskal.test(ps2.prop.stb@sam_data$Environment ~ ps2.prop.stb@sam_data$Names, data=as.matrix(bray.stb))
 ```
 
 Yes. In both cases, there are differences between bulk and rhizosphere conditions, in the growing or stable NatCom.
 
-### 12.3.3 Inocualted vs. not inoculate in each ComState and Environment
+### 8.2.3 Inocualted vs. not inoculate in each ComState and Environment
 
 Are there differences between inoculated or non-inoculated within each community state (growing and Stable) and depending if we consider the Rhizosphere or the Bulk?
 
 ```{r}
 #Are inoculated no inoculated different in GROWING?
-adonis2(formula = bray.grw ~ ps.prop.grw@sam_data$Inoculant * ps.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
+adonis2(formula = bray.grw ~ ps2.prop.grw@sam_data$Inoculant * ps2.prop.grw@sam_data$Environment, data = sampledf.grw, permutations = 9999)
 
 #Are inoculated no inoculated different in Stable?
-adonis2(formula = bray.stb ~ ps.prop.stb@sam_data$Inoculant * ps.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
+adonis2(formula = bray.stb ~ ps2.prop.stb@sam_data$Inoculant * ps2.prop.stb@sam_data$Environment, data = sampledf.stb, permutations = 9999)
 ```
 
-In the case of the growing community, there are no effects of inoculant and environment, while the environment alone has an effect, as previously observed.
-In the case of the Stable community, there's an effect of the inoculant, the environment and both; the inoculant and the environment.
-
-Let's further see these differences taking into account the environment.
-
-### 12.3.4 Pairwise PERMANOVA
-
-In case we want to test specific comparisons, we can calculate all the pairwise comparisons
-
-```{r}
-#Obtain only the BC disimilarities matrix, where columns and wonames are Names_rep.
-set.seed(123)
-bray.p=as.data.frame(as.matrix(phyloseq::distance(ps.prop, method="bray")))
-bray.p = rownames_to_column(bray.p, "id_samples")
-sampdata = data.frame(sample_data(ps.prop))
-bray.p = left_join(sampdata, bray.p, by="id_samples")
-bray.p = bray.p %>% select(-id_samples, -ComState, -Inoculant, -Environment, -Time, -Replicate, -Names, -RGBcol)
-bray.p = column_to_rownames(bray.p, "Names_rep")
-colnames(bray.p) = rownames(bray.p)
-
-library(pairwiseAdonis)
-adonis_pairs = pairwise.adonis(x= as.matrix(bray.p),
-                factors = gsub("_[123456]$", "", rownames(as.matrix(bray.p))),
-                sim.method = "bray", p.adjust.m = "fdr", perm = 9999)
-
-head(adonis_pairs)
-
-#more easy way
-#pairwise.adonis(bray.p,sampdata$Names, p.adjust.m = "fdr", perm = 9999)
-
-#save results to file
-#write.table(adonis_pairs, "adonis_pairwise.txt", sep = "\t", quote = F, row.names = F)
-```
-
-
-### 12.4 Differences in pairwise Bray-Curtis vs. variables
-
-Are the differences in sample compositions (pairwise Bray-Curtis dissimilarities) influenced by the community state?, environment? inoculant?
-
-First transform the Bray-Curtis dissimilarity matrix among samples into long format; sample1 sample2 and value of Bray-Curtis. Remove diagonals and add the metadata per comparison
-
-```{r}
-bray.rep=phyloseq::distance(ps.prop, method="bray")
-sampledf = data.frame(sample_data(ps.prop))
-bray.rep.melt = melt(as.matrix(bray.rep))
-colnames(bray.rep.melt) = c("sample1", "sample2", "BC_diss")
-head(bray.rep.melt)
-
-bray.rep.info = bray.rep.melt %>% left_join(sampledf, by=c("sample1"="id_samples")) %>% 
-  left_join(sampledf, by=c("sample2"="id_samples"))
-
-#remove diagonals
-bray.rep.info = bray.rep.info %>% filter(sample1 != sample2) %>% select(-Replicate.x, -Replicate.y, -RGBcol.x, -RGBcol.y,
-                                                                        -Names_rep.x, -Names_rep.y)
-```
-
-As previously observed, samples from sampling time 1 will have a huge effect in the growing conditions (multiple pairsiwe comparisons). We will only use samples from samplint times 5, 7 and 9 days post inoculation, and then test for homogeneicity.
-
-```{r}
-bray.rep=phyloseq::distance(subset_samples(ps.prop, Time!=1), method="bray")
-sampledf = data.frame(sample_data(subset_samples(ps.prop, Time!=1)))
-set.seed(1234)
-permutest(betadisper(bray.rep, sampledf$Names))
-```
-
-Is not homogeneously disperse, therefore we will use Wilcox test.
-
-```{r }
-#by growing state
-bc.comstate = ggplot(filter(bray.rep.info, ComState.x == ComState.y & Time.x !=1 & Time.y != 1), 
-       aes(x=ComState.x, y=BC_diss)) + 
-  ylab("Pairwise Bray-Curtis dissimilarity") + geom_violin(alpha=0.75)+ geom_boxplot(width=0.25) +  
-  xlab("Community state") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("Growing", "Stable")))+
-  scale_color_manual(values=c("#8075ae", "#4393c4"))+
-  scale_y_continuous(limits = c(0, 0.65)) +
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="BC")), nrow = 1)+
-  theme_pubclean() + theme(axis.line = element_line())
-
-#by environment
-bc.environ = ggplot(filter(bray.rep.info, ComState.x == ComState.y & Environment.x == Environment.y & Time.x !=1 & Time.y != 1), 
-       aes(x=Environment.x, y=BC_diss)) + 
-  ylab("Pairwise Bray-Curtis dissimilarity") + 
-  geom_violin(alpha=0.75)+ geom_boxplot(width=0.25, alpha=0.75) +
-  xlab("Environment") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("Bulk", "Rhiz")))+
-  scale_color_manual(values=c("#8075ae", "#4393c4"))+
-  scale_y_continuous(limits = c(0, 0.65)) +
-  facet_wrap(~ComState.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line())
-
-#by inoculant
-bc.inocul =ggplot(filter(bray.rep.info, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y & Time.x !=1 & Time.y != 1), 
-       aes(x=Inoculant.x, y=BC_diss)) + 
-  ylab("Pairwise Bray-Curtis dissimilarity") + 
-  geom_violin(alpha=0.75)+ geom_boxplot(width=0.25, alpha=0.75) +
-  xlab("Inoculant") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("CHA0", "noCHA0")))+
-  scale_color_manual(values=c("#8075ae", "#4393c4"))+
-  scale_y_continuous(limits = c(0, 0.65)) +
-  facet_wrap(~ComState.x+Environment.x, scales = "free_x", nrow = 1)+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-ggpubr::ggarrange(bc.comstate, 
-          bc.environ+ylab(""), 
-          bc.inocul+ylab(""), ncol = 3, align = "hv", widths = c(4,5.5,9.5))
-```
-
-### 12.5 Correlation of BC vs. time
+## 8.3 Correlation of Bray-Curtis vs. time
 
 ```{r )}
 library(ggpmisc)
@@ -1204,697 +861,10 @@ ggplot(filter(bray.rep.info, ComState.x == ComState.y & Environment.x == Environ
 ```
 
 
-# 13. Ecological null modeling
 
-Calculate bNTI, RCbray and the assembly process.
+# 9. *Pseudomonas*
 
-```{r, eval=FALSE}
-ps3 = prune_taxa(taxa_sums(ps2) > 0, ps2)
-meta.com = cbind(as.data.frame(sample_data(ps3)$id_samples), as.data.frame(sample_data(ps3)$Names))
-colnames(meta.com) = c("id_samples", "Names")
-meta.com = column_to_rownames(meta.com, "id_samples")
-
-qpen = qpen.cm(comm = as.matrix(otu_table(ps3)), 
-               pd = NULL, 
-               pd.big.wd = NULL,
-               pd.big.spname = NULL, 
-               tree = phy_tree(ps3),
-               meta.group = meta.com, 
-               meta.com = NULL,
-               meta.frequency = NULL,
-               meta.ab = NULL,
-               ab.weight = TRUE, 
-               exclude.conspecifics = FALSE,
-               rand.time = 1000, 
-               sig.bNTI = 2, 
-               sig.rc = 0.95,
-               nworker = 12, 
-               memory.G = 14, 
-               project = NA, 
-               wd = "Null_comm_model_v3",
-               output.detail = FALSE, 
-               save.bNTIRC = FALSE,
-               taxo.metric = "bray",
-               transform.method = NULL,
-               logbase = 2,
-               dirichlet = FALSE)
-
-#Save results
-#save(qpen, file = "Null_comm_model_v3/qpen.rda")
-```
-
-Load results
-
-```{r}
-#load("Null_comm_model_v3/qpen.rda", verbose = T)
-head(qpen$result)
-```
-
-
-Filter results to show comparisons affecting the growing or the stable community, and the contribution of each process. 
-
-```{r}
-#add grouping variables
-qpen.res = left_join(qpen$result, data.frame(sample_data(ps3)), by=c("sample1"="id_samples")) %>% select(-Replicate, -RGBcol) %>% 
-  left_join(data.frame(sample_data(ps3)), by=c("sample2"="id_samples")) %>% select(-Replicate, -RGBcol)
-head(qpen.res)
-
-#Save
-#write.table(qpen.res, "Null_comm_model_v3/qpen_res.txt", quote = F, sep = "\t", row.names = F)
-```
-
-1. By community state
-
-```{r}
-comstate.bnti = ggplot(filter(qpen.res, ComState.x == ComState.y), 
-       aes(x=ComState.x, y=bNTI, color=ComState.x)) + 
-  ylab("βNTI") + 
-  geom_violin(alpha=0.75)+ 
-  geom_boxplot(width=0.25) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  xlab("Community state") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("Growing", "Stable")))+
-  scale_color_manual(values = c("#8c5153", "#636f89"))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="ComState")), nrow = 1)+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-comstate.bnti.rc = ggplot(filter(qpen.res, ComState.x == ComState.y), 
-       aes(x=RC, y=bNTI, color=ComState.x)) + 
-  geom_point(alpha=0.5, shape=16) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  geom_vline(xintercept = c(0.95,-0.95), linetype="dashed", color="#4f4f4f")+
-  xlab("RCbray") + ylab("βNTI") +
-  xlim(c(-1.15, 1.15))+
-  scale_color_manual(values = c("#8c5153", "#636f89"))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="ComState")), nrow = 1)+
-  theme_pubclean() + theme(axis.line = element_line())
-
-comstate.turnover = ggplot(filter(qpen.res, ComState.x == ComState.y) %>% group_by(ComState.x, process) %>% dplyr::count(), 
-       aes(x=ComState.x, y=n, fill=process)) +
-  geom_bar(stat = "identity", position="fill") +
-  xlab("Community State") + ylab("% contribution") +
-  scale_fill_manual(values=ocean.matter(5))+
-  scale_y_continuous(expand = c(0,0))+
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="ComState")), nrow = 1)+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-comstate.arranged = ggarrange(comstate.bnti, 
-          comstate.bnti.rc + ylab(""), 
-          comstate.turnover, 
-          nrow = 1, widths = c(1,2,0.75), align = "h")
-
-#write.table(filter(qpen.res, ComState.x == ComState.y), "Null_comm_model_v3/qpen_res_ComState.txt", quote = F, sep = "\t", row.names = F)
-```
-
-2. By environment
-
-```{r}
-environ.bnti = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y), 
-       aes(x=Environment.x, y=bNTI, color=Environment.x)) + 
-  ylab("βNTI") + 
-  geom_violin(alpha=0.75)+ 
-  geom_boxplot(width=0.25) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  #geom_jitter()+
-  xlab("Community state") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("Bulk", "Rhiz")))+
-  scale_color_manual(values = c("#837560", "#4c8983"))+
-  #ylim(c(-3.75,4.5))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(~ComState.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-environ.bnti.rc = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y), 
-       aes(x=RC, y=bNTI, color=Environment.x)) + 
-  geom_point(alpha=0.5, shape=16) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  geom_vline(xintercept = c(0.95,-0.95), linetype="dashed", color="#4f4f4f")+
-  xlab("RCbray") + ylab("βNTI") +
-  xlim(c(-1.15, 1.15))+
-  #ylim(c(-3.75,4.5))+
-  scale_color_manual(values = c("#837560", "#4c8983"))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(~ComState.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line())
-
-environ.turnover = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y) %>% 
-                            group_by(ComState.x, Environment.x, process) %>% dplyr::count(), 
-       aes(x=Environment.x, y=n, fill=process)) +
-  geom_bar(stat = "identity", position="fill") +
-  xlab("Community State") + ylab("% contribution") +
-  scale_fill_manual(values=ocean.matter(5))+
-  scale_y_continuous(expand = c(0,0))+
-  facet_wrap(~ComState.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-environ.arrange = ggarrange(environ.bnti, 
-          environ.bnti.rc + ylab(""), 
-          environ.turnover, 
-          nrow = 1, widths = c(1,2,0.75), align = "hv")
-
-write.table(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y), 
-            "Null_comm_model_v3/qpen_res_Environ.txt", 
-            quote = F, sep = "\t", row.names = F)
-```
-
-3. By inoculant
-
-```{r}
-inoc.bnti = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y), 
-       aes(x=Inoculant.x, y=bNTI, color=Inoculant.x)) + 
-  ylab("βNTI") + 
-  geom_violin(alpha=0.75)+ 
-  geom_boxplot(width=0.25) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  #geom_jitter()+
-  xlab("Community state") +
-  stat_compare_means(method = "wilcox.test", label = "p.format", comparisons = list(c("CHA0", "noCHA0")))+
-  scale_color_manual(values = c("#45b871", "#727373"))+
-  #ylim(c(-3.75,4.5))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(~ComState.x+Environment.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-inoc.bnti.rc = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y), 
-       aes(x=RC, y=bNTI, color=Inoculant.x)) + 
-  geom_point(alpha=0.5, shape=16) +
-  geom_hline(yintercept = c(2,-2), color="red")+
-  geom_vline(xintercept = c(0.95,-0.95), linetype="dashed", color="#4f4f4f")+
-  xlab("RCbray") + ylab("βNTI") +
-  xlim(c(-1.15, 1.15))+
-  #ylim(c(-3.75,4.5))+
-  scale_color_manual(values = c("#45b871", "#727373"))+
-  scale_y_continuous(limits = c(-3.75,4.5), breaks = c(-3,-2,-1,0,1,2,3))+
-  facet_wrap(~ComState.x+Environment.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line())
-
-inoc.turnover = ggplot(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y) %>% 
-                            group_by(ComState.x, Environment.x, Inoculant.x, process) %>% dplyr::count(), 
-       aes(x=Inoculant.x, y=n, fill=process)) +
-  geom_bar(stat = "identity", position="fill") +
-  xlab("Community State") + ylab("% contribution") +
-  scale_fill_manual(values=ocean.matter(5))+
-  scale_y_continuous(expand = c(0,0))+
-  facet_wrap(~ComState.x+Environment.x, scales = "free_x")+
-  theme_pubclean() + theme(axis.line = element_line(), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-
-inoc.arrange = ggarrange(inoc.bnti, 
-          inoc.bnti.rc + ylab(""), 
-          inoc.turnover, 
-          nrow = 1, widths = c(1,2,0.75), align = "h")
-
-write.table(filter(qpen.res, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y), 
-            "Null_comm_model_v3/qpen_res_Inoculant.txt", 
-            quote = F, sep = "\t", row.names = F)
-```
-
-4. Combine all into a single plot:
-
-```{r }
-ggarrange(comstate.arranged,
-          environ.arrange,
-          inoc.arrange,
-          ncol = 1, heights = c(1,1,2), align = "hv", common.legend = F, legend = "right")
-```
-
-
-# 14. Networks
-
-Based on SParse InversE Covariance Estimation for Ecological Association Inference [SPIEC-EASI](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1004226) following the information of github: https://github.com/zdk123/SpiecEasi#working-with-phyloseq
-
-We will divide the phyloseq object according to inoculation, environment and community state, using the top 150 taxa.
-
-```{r}
-#----- Growing
-#T0 growing bulk CHA0
-ps3.grw.T0.bulk.CHA0 = subset_samples(ps3, ComState=="Growing" & Time==1 & Environment=="Bulk" & Inoculant=="CHA0")
-ps3.grw.T0.bulk.CHA0 = prune_taxa(taxa_sums(ps3.grw.T0.bulk.CHA0) > 0, ps3.grw.T0.bulk.CHA0)
-toptax.grw.T0.bulk.CHA0 = names(sort(taxa_sums(ps3.grw.T0.bulk.CHA0), decreasing=TRUE))[1:150]
-ps3.grw.T0.bulk.CHA0 <- prune_taxa(toptax.grw.T0.bulk.CHA0, ps3.grw.T0.bulk.CHA0)
-
-#se.grw.T0.bulk.CHA0 <- spiec.easi(ps3.grw.T0.bulk.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                                  nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T0.bulk.CHA0, "network/150_579_mb/6_se.grw.T0.bulk.CHA0.rds")
-
-#T0 growing bulk noCHA0
-ps3.grw.T0.bulk.noCHA0 = subset_samples(ps3, ComState=="Growing" & Time==1 & Environment=="Bulk" & Inoculant=="noCHA0")
-ps3.grw.T0.bulk.noCHA0 = prune_taxa(taxa_sums(ps3.grw.T0.bulk.noCHA0) > 0, ps3.grw.T0.bulk.noCHA0)
-toptax.grw.T0.bulk.noCHA0 = names(sort(taxa_sums(ps3.grw.T0.bulk.noCHA0), decreasing=TRUE))[1:150]
-ps3.grw.T0.bulk.noCHA0 <- prune_taxa(toptax.grw.T0.bulk.noCHA0, ps3.grw.T0.bulk.noCHA0)
-
-#se.grw.T0.bulk.noCHA0 <- spiec.easi(ps3.grw.T0.bulk.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T0.bulk.noCHA0, "network/150_579_mb/7_se.grw.T0.bulk.noCHA0.rds")
-
-#T579 growing bulk CHA0
-ps3.grw.T579.bulk.CHA0 = subset_samples(ps3, ComState=="Growing" & Time!=1 & Environment=="Bulk" & Inoculant=="CHA0")
-ps3.grw.T579.bulk.CHA0 = prune_taxa(taxa_sums(ps3.grw.T579.bulk.CHA0) > 0, ps3.grw.T579.bulk.CHA0)
-toptax.grw.T579.bulk.CHA0 = names(sort(taxa_sums(ps3.grw.T579.bulk.CHA0), decreasing=TRUE))[1:150]
-ps3.grw.T579.bulk.CHA0 <- prune_taxa(toptax.grw.T579.bulk.CHA0, ps3.grw.T579.bulk.CHA0)
-
-#se.grw.T579.bulk.CHA0 <- spiec.easi(ps3.grw.T579.bulk.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T579.bulk.CHA0, "network/150_579_mb/8_se.grw.T579.bulk.CHA0.rds")
-
-#T579 growing bulk noCHA0
-ps3.grw.T579.bulk.noCHA0 = subset_samples(ps3, ComState=="Growing" & Time!=1 & Environment=="Bulk" & Inoculant=="noCHA0")
-ps3.grw.T579.bulk.noCHA0 = prune_taxa(taxa_sums(ps3.grw.T579.bulk.noCHA0) > 0, ps3.grw.T579.bulk.noCHA0)
-toptax.grw.T579.bulk.noCHA0 = names(sort(taxa_sums(ps3.grw.T579.bulk.noCHA0), decreasing=TRUE))[1:150]
-ps3.grw.T579.bulk.noCHA0 <- prune_taxa(toptax.grw.T579.bulk.noCHA0, ps3.grw.T579.bulk.noCHA0)
-
-#se.grw.T579.bulk.noCHA0 <- spiec.easi(ps3.grw.T579.bulk.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T579.bulk.noCHA0, "network/150_579_mb/9_se.grw.T579.bulk.noCHA0.rds")
-
-#T579 growing rhiz CHA0
-ps3.grw.T579.rhiz.CHA0 = subset_samples(ps3, ComState=="Growing" & Time!=1 & Environment=="Rhiz" & Inoculant=="CHA0")
-ps3.grw.T579.rhiz.CHA0 = prune_taxa(taxa_sums(ps3.grw.T579.rhiz.CHA0) > 0, ps3.grw.T579.rhiz.CHA0)
-toptax.grw.T579.rhiz.CHA0 = names(sort(taxa_sums(ps3.grw.T579.rhiz.CHA0), decreasing=TRUE))[1:150]
-ps3.grw.T579.rhiz.CHA0 <- prune_taxa(toptax.grw.T579.rhiz.CHA0, ps3.grw.T579.rhiz.CHA0)
-
-#se.grw.T579.rhiz.CHA0 <- spiec.easi(ps3.grw.T579.rhiz.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T579.rhiz.CHA0, "network/150_579_mb/10_se.grw.T579.rhiz.CHA0.rds")
-
-#T579 growing rhiz noCHA0
-ps3.grw.T579.rhiz.noCHA0 = subset_samples(ps3, ComState=="Growing" & Time!=1 & Environment=="Rhiz" & Inoculant=="noCHA0")
-ps3.grw.T579.rhiz.noCHA0 = prune_taxa(taxa_sums(ps3.grw.T579.rhiz.noCHA0) > 0, ps3.grw.T579.rhiz.noCHA0)
-toptax.grw.T579.rhiz.noCHA0 = names(sort(taxa_sums(ps3.grw.T579.rhiz.noCHA0), decreasing=TRUE))[1:150]
-ps3.grw.T579.rhiz.noCHA0 <- prune_taxa(toptax.grw.T579.rhiz.noCHA0, ps3.grw.T579.rhiz.noCHA0)
-
-#se.grw.T579.rhiz.noCHA0 <- spiec.easi(ps3.grw.T579.rhiz.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.grw.T579.rhiz.noCHA0, "network/150_579_mb/11_se.grw.T579.rhiz.noCHA0.rds")
-
-#-------- Stable
-#T0 Stable bulk CHA0
-ps3.stb.T0.bulk.CHA0 = subset_samples(ps3, ComState=="Stable" & Time==1 & Environment=="Bulk" & Inoculant=="CHA0")
-ps3.stb.T0.bulk.CHA0 = prune_taxa(taxa_sums(ps3.stb.T0.bulk.CHA0) > 0, ps3.stb.T0.bulk.CHA0)
-toptax.stb.T0.bulk.CHA0 = names(sort(taxa_sums(ps3.stb.T0.bulk.CHA0), decreasing=TRUE))[1:150]
-ps3.stb.T0.bulk.CHA0 <- prune_taxa(toptax.stb.T0.bulk.CHA0, ps3.stb.T0.bulk.CHA0)
-
-#se.stb.T0.bulk.CHA0 <- spiec.easi(ps3.stb.T0.bulk.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T0.bulk.CHA0, "network/150_579_mb/17_se.stb.T0.bulk.CHA0.rds")
-
-#T0 Stable bulk noCHA0
-ps3.stb.T0.bulk.noCHA0 = subset_samples(ps3, ComState=="Stable" & Time==1 & Environment=="Bulk" & Inoculant=="noCHA0")
-ps3.stb.T0.bulk.noCHA0 = prune_taxa(taxa_sums(ps3.stb.T0.bulk.noCHA0) > 0, ps3.stb.T0.bulk.noCHA0)
-toptax.stb.T0.bulk.noCHA0 = names(sort(taxa_sums(ps3.stb.T0.bulk.noCHA0), decreasing=TRUE))[1:150]
-ps3.stb.T0.bulk.noCHA0 <- prune_taxa(toptax.stb.T0.bulk.noCHA0, ps3.stb.T0.bulk.noCHA0)
-
-#se.stb.T0.bulk.noCHA0 <- spiec.easi(ps3.stb.T0.bulk.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T0.bulk.noCHA0, "network/150_579_mb/18_se.stb.T0.bulk.noCHA0.rds")
-
-#T579 Stable bulk CHA0
-ps3.stb.T579.bulk.CHA0 = subset_samples(ps3, ComState=="Stable" & Time!=1 & Environment=="Bulk" & Inoculant=="CHA0")
-ps3.stb.T579.bulk.CHA0 = prune_taxa(taxa_sums(ps3.stb.T579.bulk.CHA0) > 0, ps3.stb.T579.bulk.CHA0)
-toptax.stb.T579.bulk.CHA0 = names(sort(taxa_sums(ps3.stb.T579.bulk.CHA0), decreasing=TRUE))[1:150]
-ps3.stb.T579.bulk.CHA0 <- prune_taxa(toptax.stb.T579.bulk.CHA0, ps3.stb.T579.bulk.CHA0)
-
-#se.stb.T579.bulk.CHA0 <- spiec.easi(ps3.stb.T579.bulk.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T579.bulk.CHA0, "network/150_579_mb/19_se.stb.T579.bulk.CHA0.rds")
-
-#T579 Stable bulk noCHA0
-ps3.stb.T579.bulk.noCHA0 = subset_samples(ps3, ComState=="Stable" & Time!=1 & Environment=="Bulk" & Inoculant=="noCHA0")
-ps3.stb.T579.bulk.noCHA0 = prune_taxa(taxa_sums(ps3.stb.T579.bulk.noCHA0) > 0, ps3.stb.T579.bulk.noCHA0)
-toptax.stb.T579.bulk.noCHA0 = names(sort(taxa_sums(ps3.stb.T579.bulk.noCHA0), decreasing=TRUE))[1:150]
-ps3.stb.T579.bulk.noCHA0 <- prune_taxa(toptax.stb.T579.bulk.noCHA0, ps3.stb.T579.bulk.noCHA0)
-
-#se.stb.T579.bulk.noCHA0 <- spiec.easi(ps3.stb.T579.bulk.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T579.bulk.noCHA0, "network/150_579_mb/20_se.stb.T579.bulk.noCHA0.rds")
-
-
-#T579 Stable rhiz CHA0
-ps3.stb.T579.rhiz.CHA0 = subset_samples(ps3, ComState=="Stable" & Time!=1 & Environment=="Rhiz" & Inoculant=="CHA0")
-ps3.stb.T579.rhiz.CHA0 = prune_taxa(taxa_sums(ps3.stb.T579.rhiz.CHA0) > 0, ps3.stb.T579.rhiz.CHA0)
-toptax.stb.T579.rhiz.CHA0 = names(sort(taxa_sums(ps3.stb.T579.rhiz.CHA0), decreasing=TRUE))[1:150]
-ps3.stb.T579.rhiz.CHA0 <- prune_taxa(toptax.stb.T579.rhiz.CHA0, ps3.stb.T579.rhiz.CHA0)
-
-#se.stb.T579.rhiz.CHA0 <- spiec.easi(ps3.stb.T579.rhiz.CHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T579.rhiz.CHA0, "network/150_579_mb/21_se.stb.T579.rhiz.CHA0.rds")
-
-#T579 Stable rhiz noCHA0
-ps3.stb.T579.rhiz.noCHA0 = subset_samples(ps3, ComState=="Stable" & Time!=1 & Environment=="Rhiz" & Inoculant=="noCHA0")
-ps3.stb.T579.rhiz.noCHA0 = prune_taxa(taxa_sums(ps3.stb.T579.rhiz.noCHA0) > 0, ps3.stb.T579.rhiz.noCHA0)
-toptax.stb.T579.rhiz.noCHA0 = names(sort(taxa_sums(ps3.stb.T579.rhiz.noCHA0), decreasing=TRUE))[1:150]
-ps3.stb.T579.rhiz.noCHA0 <- prune_taxa(toptax.stb.T579.rhiz.noCHA0, ps3.stb.T579.rhiz.noCHA0)
-
-#se.stb.T579.rhiz.noCHA0 <- spiec.easi(ps3.stb.T579.rhiz.noCHA0, method='mb', lambda.min.ratio=1e-1,
-#                           nlambda=20, pulsar.params=list(rep.num=100))
-
-#saveRDS(se.stb.T579.rhiz.noCHA0, "network/150_579_mb/22_se.stb.T579.rhiz.noCHA0.rds")
-```
-
-Now we will get the graphs form each network
-
-```{r}
-set.seed(123456)
-net.files = list.files("network/150_579_mb/", pattern = "se.")
-networks_all = data.frame()
-ig2s = list() #store igraphs in list
-n=0
-
-for (i in net.files) {
-  f = readRDS(paste0("network/150_579_mb/",i))
-  psname = gsub("(.*)_se.", "ps3.", i)
-  psname = get(gsub(".rds", "", psname))
-  #Obtain colors for positive or negative edges:
-  optbeta = as.matrix(symBeta(getOptBeta(f)))
-  edge_cols = ifelse(optbeta>0, '1_positive', '2_negative')[upper.tri(optbeta) & optbeta!=0]
-  ig2 = adj2igraph(getRefit(f), vertex.attr = list(name=taxa_names(psname)), edge.attr=list(color= edge_cols))
-  #ig2 = adj2igraph(getRefit(f), vertex.attr = list(name=taxa_names(psname)))
-  n = n+1
-  ig2s[[n]] = ig2
-  #Create the dataframe containing dots
-  net = ggnetwork(ig2, arrow.gap = 0, )
-  #Add taxonomy
-  tax = data.frame(tax_table(psname)) %>% rownames_to_column(var="ASVs")
-  net = left_join(net, tax, by=c("name"="ASVs"))
-  #Change samples names to something more conspicuous
-  sampname = gsub("(.*)_se.", "", i)
-  sampname = gsub("grw.", "Growing-", sampname)
-  sampname = gsub("stb.", "Stable-", sampname)
-  sampname = gsub(".rds", "", sampname)
-  #Store results in networks_all adding the condition
-  net = cbind(net, "Condition"=sampname)
-  networks_all=rbind(networks_all, net)
-}
-
-#Assign names to ig2 list
-net.files.names = gsub("(.*)_se.", "", net.files)
-net.files.names = gsub("grw.", "Growing-", net.files.names)
-net.files.names = gsub("stb.", "Stable-", net.files.names)
-net.files.names = gsub(".rds", "-", net.files.names)
-names(ig2s) = net.files.names
-
-```
-
-Now we can plot all together:
-
-```{r }
-library(ggraph)
-ggplot(networks_all, aes(x = x,  y = y, xend = xend,  yend = yend))+
-  geom_edges(size=0.5, alpha = 1, curvature = 0.25, aes(colour=color)) +
-  geom_nodes(size = 2, aes(color=Class), shape=16)+
-  geom_nodes(data = filter(networks_all, name=="ASV1148"),size = 2, color="green")+
-  scale_color_manual(values=c("darkred", "darkgreen", ocean.balance(15)))+
-  theme_blank()+
-  coord_equal()+
-  facet_wrap(~Condition, ncol = 4)
-```
-
-## 14.1 Hub detection
-
-Protocols described here: https://link.springer.com/protocol/10.1007/978-1-4939-8728-3_16
-A hub in a microbiome can be consiered as a keystone species in the microbial community.
-
-All network graphs are stored in ig2s, I'll iterate through them to retrieve the hub_score, the modularity and the number off edges (connetions) of the networks.
-
-```{r}
-network_stats = data.frame()
-
-for (j in 1:length(ig2s)) {
-  graph.j = ig2s[[j]]
-  name = names(ig2s[j])
-  hub.scr = data.frame("Hub_score"=hub_score(graph.j)$vector) %>% rownames_to_column(var="ASVs")
-  modules = cluster_fast_greedy(graph.j)
-  modularity = modularity(modules)
-  edges = gsize(graph.j)
-  degree = degree(graph.j)
-  res.j = cbind(name, hub.scr, modularity, edges, degree)
-  network_stats = rbind(network_stats, res.j)
-}
-
-#Add taxonomy to ASVs
-ps3.tax = data.frame(tax_table(ps3)) %>% rownames_to_column(var="ASVs")
-network_stats = left_join(network_stats, ps3.tax, by=c("ASVs"="ASVs"))
-head(network_stats)
-```
-
-I'll consider keystone taxa those with a modularity score >= 0.70
-
-```{r }
-keystones = ggplot(network_stats, aes(y=ASVs)) +
-  geom_point(aes(x=Hub_score), alpha=0.5, shape=16, size=0.70)+
-  geom_point(data=filter(network_stats, Hub_score >= 0.70), aes(x=Hub_score, color=Class), shape=16)+
-  scale_x_continuous(limits = c(0,1.8))+
-  scale_color_manual(values=ocean.balance(10))+
-  geom_vline(xintercept = 0.7, linetype="dashed", color="red") +
-  facet_wrap(~name, scales = "free") +
-  ggrepel::geom_text_repel(data=filter(network_stats, Hub_score >= 0.70), 
-                            aes(x= Hub_score, label=Genus, fontface="italic", color=Class), 
-                           size=1.8, 
-                           nudge_x = 2, direction = "y",
-                           force=20, segment.size=0.2, segment.color="grey") +
-  theme_pubr() + theme(axis.text.y = element_blank(), axis.ticks.y=element_blank(), 
-                     axis.line.x = element_line(),
-                     axis.line.y = element_line(),
-                     panel.grid = element_blank(), panel.border = element_blank())
-
-keystones.labs = select(network_stats, name, modularity, edges) %>% unique()
-keystones + geom_text(x=0.8, y=35, aes(label=paste0("Modularity: ", round(modularity, 4))), 
-                      data=keystones.labs, size=2, hjust = 0) + 
-  geom_text(x=0.8, y=65, aes(label=paste0("Edges: ", edges)),
-            data=keystones.labs, size=2, hjust = 0)
-```
-
-
-
-## 14.2 Positive and negative interactions
-
-```{r}
-interactions = data.frame()
-
-for (k in net.files) {
-  f = readRDS(paste0("network/150_579_mb/",k))
-  sampname = gsub("(.*)_se.", "", k)
-  sampname = gsub("grw.", "Growing-", sampname)
-  sampname = gsub("stb.", "Stable-", sampname)
-  sampname = gsub(".rds", "", sampname)
-  betaMat=as.matrix(symBeta(getOptBeta(f)))
-  # We divide by two since an edge is represented by two entries in the matrix.
-  positive=length(betaMat[betaMat>0])/2 
-  negative=length(betaMat[betaMat<0])/2 
-  total=length(betaMat[betaMat!=0])/2 
-  inter.res = cbind("Condition"=sampname, positive, negative, total)
-  interactions = rbind(interactions, inter.res)
-}
-head(interactions)
-
-```
-
-# 15. Differential abundane
-
-Filter the phyloseq object to obtain the two conditions we want to compare. A priori, we are gonna foccus on timepoints 1 and 9. Define the conditions of interest:
-
-```{r}
-daa.comparisons = list(c("Growing_1_Bulk_CHA0", "Growing_1_Bulk_noCHA0"), c("Growing_9_Bulk_CHA0", "Growing_9_Bulk_noCHA0"),
-                       c("Growing_9_Rhiz_CHA0", "Growing_9_Rhiz_noCHA0"), c("Growing_1_Bulk_CHA0", "Growing_9_Bulk_CHA0"), 
-                       c("Growing_1_Bulk_CHA0", "Growing_9_Rhiz_CHA0"), c("Growing_9_Bulk_CHA0", "Growing_9_Rhiz_CHA0"), 
-                       c("Growing_1_Bulk_noCHA0", "Growing_9_Bulk_noCHA0"), c("Growing_1_Bulk_noCHA0", "Growing_9_Rhiz_noCHA0"), 
-                       c("Growing_9_Bulk_noCHA0", "Growing_9_Rhiz_noCHA0"), c("Stable_1_Bulk_CHA0", "Stable_1_Bulk_noCHA0"), 
-                       c("Stable_9_Bulk_CHA0", "Stable_9_Bulk_noCHA0"), c("Stable_9_Rhiz_CHA0", "Stable_9_Rhiz_noCHA0"), 
-                       c("Stable_1_Bulk_CHA0", "Stable_9_Bulk_CHA0"), c("Stable_1_Bulk_CHA0", "Stable_9_Rhiz_CHA0"), 
-                       c("Stable_9_Bulk_CHA0", "Stable_9_Rhiz_CHA0"), c("Stable_1_Bulk_noCHA0", "Stable_9_Bulk_noCHA0"), 
-                       c("Stable_1_Bulk_noCHA0", "Stable_9_Rhiz_noCHA0"), c("Stable_9_Bulk_noCHA0", "Stable_9_Rhiz_noCHA0"), 
-                       c("Growing_1_Bulk_CHA0", "Stable_1_Bulk_CHA0"), c("Growing_1_Bulk_noCHA0", "Stable_1_Bulk_noCHA0"),
-                       c("Growing_9_Bulk_CHA0", "Stable_9_Bulk_CHA0"), c("Growing_9_Bulk_noCHA0", "Stable_9_Bulk_noCHA0"),
-                       c("Growing_9_Rhiz_CHA0", "Stable_9_Rhiz_CHA0"), c("Growing_9_Rhiz_noCHA0", "Stable_9_Rhiz_noCHA0"))
-```
-
-Iterate thought this list to calculate the differential abundance of taxa:
-
-```{r, eval=FALSE}
-daa.comparisons[[1]][2]
-
-#define cutoffs for differential abundance
-alpha=0.01
-l2FC = 2.5
-
-n= 0
-p= list()
-c= list()
-all_results = data.frame()
-all_counts = data.frame()
-
-for (x in daa.comparisons){
-  n=n+1 
-  new_phylo = subset_samples(ps2, Names == daa.comparisons[[n]][1] | Names == daa.comparisons[[n]][2])
-  new_phylo = prune_taxa(taxa_sums(new_phylo) > 0, new_phylo)
-  #perform the deseq
-  deseq = phyloseq_to_deseq2(new_phylo, ~Names)
-  daa = DESeq(deseq, test = "Wald", fitType = "local")
-  res=results(daa,cooksCutoff = F)
-  
-  filename = paste0("DESeq2/", n, "_DESeq2_raw_", daa.comparisons[[n]][1], "_vs_", daa.comparisons[[n]][2], "_table.tab")
-  write.table(cbind(as(res, "data.frame"), as(tax_table(new_phylo)[rownames(res), ], "matrix")), 
-              file= filename, quote=F, sep="\t")
-  
-  #FILTER FOR VOLCANO PLOT
-  volcano = cbind(as(res, "data.frame"), as(tax_table(new_phylo)[rownames(res), ], "matrix"))
-  volcano$condition = paste0(n,"_",daa.comparisons[[n]][1], "_vs_", daa.comparisons[[n]][2])
-  volcano$diffexpressed = "NO"
-  volcano$diffexpressed[volcano$log2FoldChange <= -l2FC & volcano$padj < 0.01] = paste0(daa.comparisons[[n]][1])
-  volcano$diffexpressed[volcano$log2FoldChange >= l2FC & volcano$padj < 0.01] = paste0(daa.comparisons[[n]][2])
-  volcano$cond = "NO"
-  volcano$cond[volcano$log2FoldChange <= -l2FC & volcano$padj < 0.01] = "condition1"
-  volcano$cond[volcano$log2FoldChange >= l2FC & volcano$padj < 0.01] = "condition2"
-  volcano$label = NA
-  volcano$Genus = gsub('Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium', "Rhizobium group", volcano$Genus)
-  volcano$label[volcano$diffexpressed != "NO"] = volcano$Genus[volcano$diffexpressed != "NO"]
-  volcano$label = gsub('uncultured', NA, volcano$label)
-  volcano$PhylumCol = volcano$Phylum
-  volcano$PhylumCol[volcano$diffexpressed == "NO"] = "Not sigificant"
-  volcano = rownames_to_column(volcano, var="asvs")
-  volcano = left_join(volcano, abundance.df, by=c("asvs"))
-  volcano$abundance[volcano$log2FoldChange < 0] = volcano$condition1.ab[volcano$log2FoldChange < 0]
-  volcano$abundance[volcano$log2FoldChange > 0] = volcano$condition2.ab[volcano$log2FoldChange > 0]
-  #only for the most abundant phyla:
-  volcano$Color = NA
-  volcano = volcano %>% mutate(Color = ifelse(Phylum %in% c("Proteobacteria", 
-                                                                    "Bacteroidota",
-                                                                    "Firmicutes",
-                                                                    "Verrucomicrobiota",
-                                                                    "Planctomycetota",
-                                                                    "Acidobacteriota",
-                                                                    "Actinobacteriota", "Not sigificant"), Phylum, "Other"))
-  #make sizes into 5 levels.
-  volcano$abund_levels[volcano$abundance < 0.001] = "1. < 0.001"
-  volcano$abund_levels[volcano$abundance >= 0.001 & volcano$abundance < 0.01] = "2. 0.001 - 0.01"
-  volcano$abund_levels[volcano$abundance >= 0.01 & volcano$abundance < 0.1] = "3. 0.01 - 0.1"
-  volcano$abund_levels[volcano$abundance >= 0.1 & volcano$abundance < 1] = "4. 0.1 - 1"
-  volcano$abund_levels[volcano$abundance >= 1 ] = "5. >= 1"
-  
-  p[[n]] = ggplot(volcano, aes(x=log2FoldChange, y=-log(padj,10), col=Color, label=label)) + 
-    geom_point(aes(size=abund_levels), alpha=0.25, shape=16) +
-    geom_text_repel(aes(label=label), max.overlaps = 40, size=2) +
-    geom_vline(xintercept=c(2.5, -2.5), col="grey", alpha=0.5) +
-    geom_hline(yintercept=-log10(0.01), col="grey", alpha=0.5) +
-    scale_color_manual(values=rev(c("dodgerblue4", "cadetblue3", "darkseagreen4", "palegreen3", "grey", "coral2", "tan", "deeppink4", "purple3")))  +
-    ggtitle(paste(daa.comparisons[[n]][1]," vs. ",daa.comparisons[[n]][2])) +
-    theme_classic2()
-  
-  #Plot the "venn diagrams" with the counts of diff expressed per condition.
-  counts = volcano %>% group_by(condition, cond) %>% dplyr::count()
-  
-  #save the volcano cand counts results as a combination of comparisons tables
-  all_results = rbind(all_results, volcano)
-  all_counts = rbind(all_counts, counts)
-}
-
-daa.results = all_results
-write.table(all_results, "DESeq2/all_results2.txt", quote = F, sep="\t", row.names = F)
-```
-
-or load from a new session:
-
-```{r}
-daa.results = read.table("DESeq2/all_results2.txt", header = T, sep = "\t")
-```
-
-I'll add another label option to include both, the genus and the ASV in the case of Pseudomonas, as it might be useful to differentiate some taxa.
-
-```{r}
-daa.results$label3[!is.na(daa.results$label)] = daa.results$label[!is.na(daa.results$label)]
-daa.results$label3[!is.na(daa.results$label3) & daa.results$label3=="Pseudomonas"] = paste0(daa.results$label3[!is.na(daa.results$label3) & daa.results$label3=="Pseudomonas"], "_",
-                                                       daa.results$asvs[!is.na(daa.results$label3) &daa.results$label3=="Pseudomonas"])
-
-
-#add ordering variable of condition
-daa.results$ordering = gsub("_(.*)$", "", daa.results$condition)
-
-
-#make padj sizes into 5 levels.
-daa.results$padj_levels[daa.results$padj >= 0.01 ] = 1 #5. >= 0.01
-daa.results$padj_levels[daa.results$padj >= 0.001 & daa.results$padj < 0.01] = 3 #4. >=0.001 - <0.01
-daa.results$padj_levels[daa.results$padj >= 0.0001 & daa.results$padj < 0.001] = 3 #3. >=0.0001 - <0.001
-daa.results$padj_levels[daa.results$padj >= 0.00001 & daa.results$padj < 0.0001] = 4 #2. >=0.00001 - <0.0001
-daa.results$padj_levels[daa.results$padj < 0.00001] = 5 #1. < 0.00001
-```
-
-## 15.1 Volcano plots
-
-```{r }
-#pdf(file="DESeq2/DESeq2_plot_auto25.pdf", width = 16, height = 35)
-daa.plot = ggplot(daa.results, aes(x=log2FoldChange, y=-log(padj,10), col=Color)) + 
-  geom_point(alpha = 0.5, shape=16, size=3) +
-  geom_point(data= filter(daa.results, asvs=="ASV1148"), alpha = 0.25, shape=16, size=3, color="green") +
-  geom_text_repel(aes(label=label3), max.overlaps = 25, size=2, force = 4) + #maxoverlaps I put 45, might do zooms later!
-  geom_vline(xintercept=c(2.5, -2.5), col="grey", alpha=0.5) +
-  geom_hline(yintercept=-log10(0.05), col="grey", alpha=0.5) +
-  #scale_color_manual(values =rev(c(ocean.deep(4), "grey", ocean.speed(4)))) +
-  scale_color_manual(values=c("#181C43","#1950BA","#4F96BA","#BECDD3", "grey50", "#E1C1B8","#C66E51","#991527","#3C0912"))  +
-  ggtitle("Differentially Abundant ASVs") +
-  facet_wrap(~condition, nrow = 8, scales = "free") +
-  theme_classic2() + theme(strip.background = element_blank())
-daa.plot
-#dev.off()
-```
-
-Another way of representing this, without recurring to Volcano plots, representing the adj. p-value as sizes of the dots, while the y axis is the genus, which we can order according to the Phylum.
-
-```{r}
-daa.results  %>% 
-  filter(ordering %in% c("1","2","3","4","5","6","7","8","9","10","11","12", "13", "14", "15", "16", "17", "18")) %>%
-  ggplot(aes(x=Genus, y=log2FoldChange, group=Phylum, color=PhylumCol)) +
-  geom_point(aes(size=padj_levels)) +
-  geom_hline(yintercept = c(-2.5, 2.5), color="red", linetype="dashed")+
-  ylim(c(-30,30))+
-  scale_color_manual(values=c("#181C43","#2641A2", "#247ABA", "#73A8BD", "#C9D3D7", "#E4CAC3", "#CF8971",
-                              "grey50","#B8462D", "#850E28", "#3C0912"))+
-  scale_size(range = c(2.5,0.1), limits = c(0.01, NA), breaks = c(5,4,3,2,1),
-             labels = c(">= 0.01", "0.001 - 0.01", "0.0001 - 0.001", "0.00001 - 0.0001", "< 0.00001"))+
-  geom_text_repel(
-    data=filter(daa.results, ordering %in% c("1","2","3","4","5","6","7","8","9","10","11","12", "13", "14", "15", "16", "17", "18") & 
-                  padj < 0.01 & log2FoldChange >= 2.5 | log2FoldChange <= -2.5),
-                  aes(label = label3), fontface = "italic", size=0.7, max.overlaps = 25, ylim = c(-25,25))+
-  theme_pubr()+
-  theme(axis.text.x = element_text(size=8, hjust = 0.5, vjust=0.5), 
-        axis.text.y = element_text(size=6), legend.position = "bottom")+
-  coord_flip()+
-  facet_grid2(cols=vars(reorder(condition, as.numeric(ordering))), rows=vars(Phylum), 
-              scales="free_y", space = T, switch = "y")
-```
-
-## 15.2 Counts per condition
-
-```{r }
-head(as.data.frame(all_counts))
-ord.cond = c("condition2", "NO", "condition1")
-
-ggplot(all_counts, 
-       aes(x=n, y=condition, fill=factor(cond, levels=ord.cond), color=factor(cond, levels=ord.cond))) +
-  geom_bar(stat="identity", position = "stack", width = 0.5) +
-  scale_fill_manual(values=c("darkgreen","grey", "darkred"))+
-  scale_color_manual(values=c("darkgreen","grey", "darkred"))+
-  geom_text_repel(aes(label = n),
-                  position=ggpp::position_stacknudge(vjust=0.5, y=0.35),
-                  direction="x", hjust="center")+
-  facet_wrap(~condition, scales = "free_y", ncol = 4, dir = "v") + theme_void()
-```
-
-
-# 16. *Pseudomonas*
-
-## 16.1 Relative abundance of top 5 *Pseudomonas* ASVs
+## 9.1 Relative abundance of top 5 *Pseudomonas* ASVs
 
 ```{r}
 ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
@@ -1909,9 +879,8 @@ ps.toptax.Pseudo = prune_taxa(toptax.Pseudo, ps2.propPseudo)
 
 Pseudo = as.data.frame(otu_table(ps.toptax.Pseudo))
 Pseudo = rownames_to_column(Pseudo, "id_samples")
-Pseudo.melt = melt(Pseudo)
+Pseudo.melt = reshape2::melt(Pseudo)
 Pseudo.melt = Pseudo.melt %>% left_join(data.frame(sample_data(ps2.propPseudo)), by="id_samples")
-head(Pseudo.melt)
 
 ggplot(filter(Pseudo.melt, Time %in% c(1,9)), aes(x=Names, y=value/4))+
   geom_bar(aes(fill=variable), stat="identity")+ ylab("Normalized relative abundance")+
@@ -1921,7 +890,7 @@ ggplot(filter(Pseudo.melt, Time %in% c(1,9)), aes(x=Names, y=value/4))+
 
 ```
 
-## 16.2 Differences in relative abundance of *Pseudomonas*
+## 9.2 Differences in relative abundance of *Pseudomonas*
 
 ```{r}
 ps2.css.propPseudo = subset_taxa(ps2.css.prop, Genus=="Pseudomonas")
@@ -1934,170 +903,42 @@ ps.css.toptax.Pseudo = prune_taxa(toptax.css.Pseudo, ps2.css.propPseudo)
 
 Pseudo.css = as.data.frame(otu_table(ps.css.toptax.Pseudo))
 Pseudo.css = rownames_to_column(Pseudo.css, "id_samples")
-Pseudo.css.melt = melt(Pseudo.css)
-Pseudo.css.melt = Pseudo.css.melt %>% left_join(data.frame(sample_data(ps2.css.propPseudo)), by="id_samples")
+Pseudo.css.melt = reshape2::melt(Pseudo.css)
+Pseudo.css.melt = Pseudo.css.melt %>% 
+  left_join(data.frame(sample_data(ps2.css.propPseudo)), by= join_by("variable" == "id_samples"))
 head(Pseudo.css.melt)
 ```
 
 
 ```{r warning=FALSE}
-ps.comparisons = list(c("Growing_1_Bulk_CHA0", "Growing_1_Bulk_noCHA0"), 
-                      c("Growing_9_Bulk_CHA0", "Growing_9_Bulk_noCHA0"),
-                      c("Growing_9_Rhiz_CHA0", "Growing_9_Rhiz_noCHA0"),
-                      c("Stable_1_Bulk_CHA0", "Stable_1_Bulk_noCHA0"), 
-                      c("Stable_9_Bulk_CHA0", "Stable_9_Bulk_noCHA0"),
-                      c("Stable_9_Rhiz_CHA0", "Stable_9_Rhiz_noCHA0"),
-                      c("Growing_1_Bulk_CHA0", "Stable_1_Bulk_CHA0"),
-                      c("Growing_9_Bulk_CHA0", "Stable_9_Bulk_CHA0"),
-                      c("Growing_9_Rhiz_CHA0", "Stable_9_Rhiz_CHA0"),
-                      c("Growing_1_Bulk_noCHA0", "Stable_1_Bulk_noCHA0"),
-                      c("Growing_9_Bulk_noCHA0", "Stable_9_Bulk_noCHA0"),
-                      c("Growing_9_Rhiz_noCHA0", "Stable_9_Rhiz_noCHA0"))
+Pseudo.melt.filtered = filter(Pseudo.css.melt, id_samples %in% c("ASV1142","ASV1148", "ASV1168", "ASV1169", "ASV1173") & Time %in% c(1,9))
 
 
-Pseudo.melt.filtered = filter(Pseudo.css.melt, variable %in% c("ASV1142","ASV1148", "ASV1168", "ASV1169", "ASV1173") & Time %in% c(1,9)) 
+plots_ps = list()
 
-ggplot(Pseudo.melt.filtered, aes(x=Names, y=value)) +
-  geom_bar(position = "identity", stat = "summary", fill="darkgrey", width = 0.7, fun = mean) +
+for (i in c("ASV1142","ASV1148", "ASV1168", "ASV1169", "ASV1173")){
+  pseudo_name = i
+  df = filter(Pseudo.melt.filtered, id_samples == i)
+  kw = agricolae::kruskal(df$value, df$Names, p.adj = "BH")
+  kwres = rownames_to_column(kw$groups, var="StateEnviron")
+  
+  plots_ps[[i]] = ggplot(df, aes(x=Names, y=value)) +
+  #geom_bar(position = "identity", stat = "summary", fill="darkgrey", width = 0.7, fun = mean) +
+  geom_segment(aes(y = value, yend = 0), stat = "summary", 
+               position = "identity", width = 0.7, fun = mean, size = 15, color="darkgrey")+
   geom_jitter(shape=16, width = 0.2)+
-  stat_compare_means(test="kruskal.test", label = "p.signif",symnum.args = symnum.args, comparisons = ps.comparisons, na.rm = T) +
-  xlab("Sampling time (days)") + ylab("normalized relative abundance (%)")+
-  ggtitle("CHA0 abundance", subtitle = "significance: Kruskal test")+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x))) +
+  annotate(geom = "text", x=kwres$StateEnviron, y=100, label=kwres$groups)+
+  xlab("Sampling time (days)") + ylab("Normalized relative abundance (%)")+
+  ggtitle("CHA0 abundance",  subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
+  scale_y_log10(limits = c(0.001, 100),
+                breaks = trans_breaks("log10", function(x) 10^x), 
+                labels = trans_format("log10", math_format(10^.x))) +
   geom_errorbar(stat="summary", width=0.3) +
   annotation_logticks(sides = "l") +
-  facet_wrap(~variable, scales = "free_x", ncol = 4)+
-  theme_pubr() + theme(axis.text.x = element_text(angle = 35, vjust =1, hjust=1))
-
-#Perform test outside ggplot2 and save results:
-for (i in 1:length(unique(Pseudo.melt.filtered$variable))){ 
-  asv = as.character(unique(Pseudo.melt.filtered$variable)[i])
-  Pseudo.melt.filtered2 = filter(Pseudo.melt.filtered, variable == asv)
-  wilcox.pair = pairwise.wilcox.test(Pseudo.melt.filtered2$value, Pseudo.melt.filtered2$Names, p.adjust.method = "none")
-  write.table(melt(wilcox.pair$p.value), paste0("Pstop4stats/", asv, "_pair_wilcox.txt"), sep = "\t", quote = F, row.names = F)
+  theme_pubr() + 
+  theme(axis.text.x = element_blank())
 }
 
-kruskalPseudo.pair = pairwise.wilcox.test(Pseudo.melt.filtered$value, Pseudo.melt.filtered$Names, p.adjust.method = "fdr")
-write.table(melt(kruskalPseudo.pair$p.value), "Pstop4stats/Pairwise_wilcox.txt", sep = "\t", quote = F, row.names = F)
-```
-
-# 17. *Pseudomonas* competition analyses
-
-## 17.1 CFUs
-
-```{r}
-data = read.table("../PS_ASVs_4_5/Competition_Rhiz_Bulk/Raw_data_rhiz_bulk_liq.txt", header = T, sep = "\t")
-data3w = read.table("../PS_ASVs_4_5/Competition_Rhiz_Bulk/3w_Raw_data_rhiz_bulk_liq.txt", header = T, sep = "\t")
-
-#Transorm names with respective ASVs:
-data = data.frame(lapply(data, function(y) gsub("ASV5", "ASV1168", y)))
-data = data.frame(lapply(data, function(y) gsub("ASV4", "ASV1173", y)))
-data = transform(data, Order = as.numeric(Order), CI = as.numeric(CI))
-
-data3w = data.frame(lapply(data3w, function(y) gsub("ASV5", "ASV1168", y)))
-data3w = data.frame(lapply(data3w, function(y) gsub("ASV4", "ASV1173", y)))
-data3w = transform(data3w, Order = as.numeric(Order), CI = as.numeric(CI))
-```
-
-
-```{r}
-pw2 = ggplot(filter(data, Condition != "1_Liquid"), aes(x=Condition, y=CI)) + 
-  geom_boxplot() +
-  geom_jitter(aes(color=Experiment), alpha=0.5, size=3, shape=16) +
-  geom_hline(yintercept = 10^0, color="red", linetype="dashed") +
-  ylab("log10(Competition Index)") +
-  theme_pubclean()+theme(axis.line = element_line())+
-  stat_compare_means(method = "wilcox.test", comparisons = list(c("Bulk", "Rhizosphere")), label = "p.format",)+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)), limits=c(0.05,100000)) +
-  annotation_logticks(sides = "l") +
-  facet_wrap(~reorder(Experiment, Order), scales = 'free_x', ncol = 3) + ggtitle("Pairwise competition", subtitle = "Significance: Wilcoxon")
-
-pw2
-
-pw2liq = ggplot(data, aes(x=Condition, y=CI)) + 
-  geom_boxplot() +
-  geom_jitter(aes(color=Experiment), alpha=0.5, size=3, shape=16) +
-  geom_hline(yintercept = 10^0, color="red", linetype="dashed") +
-  ylab("log10(Competition Index)") +
-  theme_pubclean()+theme(axis.line = element_line())+
-  stat_compare_means(method = "wilcox.test", comparisons = list(c("1_Liquid", "Bulk"), 
-                                                                c("1_Liquid", "Rhizosphere"), 
-                                                                c("Bulk", "Rhizosphere")), 
-                     label = "p.format",)+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)), limits=c(0.05,100000)) +
-  annotation_logticks(sides = "l") +
-  facet_wrap(~reorder(Experiment, Order), scales = 'free_x', ncol = 3) + ggtitle("Pairwise competition", subtitle = "Significance: Wilcoxon")
-
-pw2liq
-
-pw3 = ggplot(data3w, aes(x=Condition, y=CI)) + 
-  geom_boxplot() +
-  geom_jitter(aes(color=Experiment), alpha=0.5, size=3, shape=16) +
-  geom_hline(yintercept = 10^0, color="red", linetype="dashed") +
-  ylab("log10(Competition Index)") +
-  theme_pubclean()+theme(axis.line = element_line())+
-  stat_compare_means(method = "wilcox.test", comparisons = list(c("Bulk", "Rhizosphere")), label = "p.format",)+
-  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)), limits=c(0.05,100000)) +
-  annotation_logticks(sides = "l") +
-  facet_wrap(~reorder(Experiment, Order), scales = 'free_x', ncol = 3) + ggtitle("Triplewise competition", subtitle = "Significance: Wilcoxon")
-
-pw3
-pw = ggarrange(pw2,
-          pw3, align = "hv", ncol = 2, common.legend = T)
-```
-
-Represent the abundance of CFUs as a %.
-
-```{r}
-cfus = read.table("../PS_ASVs_4_5/Competition_Rhiz_Bulk/CFUs_2and3wise.txt", header = T, sep = "\t")
-
-#Transorm names with respective ASVs:
-cfus = data.frame(lapply(cfus, function(y) gsub("ASV5", "ASV1168", y)))
-cfus = data.frame(lapply(cfus, function(y) gsub("ASV4", "ASV1173", y)))
-cfus = transform(cfus, Order = as.numeric(Order), CFUs.g = as.numeric(CFUs.g))
-cfus = cfus %>% group_by(Comparison, Experiment, Strain, Environment, Order) %>% summarise(CFUs.g = mean(CFUs.g))
-
-ggplot(cfus, aes(x=Environment, y=CFUs.g, fill=Strain))+
-  geom_bar(stat="identity", position="fill") +
-  facet_wrap(~Comparison+reorder(Experiment, Order), ncol = 4)+
-  ylab("% of total CFUs · g-1")+
-  theme_pubclean() +
-  theme(axis.line = element_line())
-```
-
-## 17.2 Plant measurements
-
-```{r}
-plant = read.table("../PS_ASVs_4_5/Competition_Rhiz_Bulk/Raw_data_plant.txt", header = T, sep = "\t")
-#Transorm names with respective ASVs:
-plant = data.frame(lapply(plant, function(y) gsub("ASV5", "ASV1168", y)))
-plant = data.frame(lapply(plant, function(y) gsub("ASV4", "ASV1173", y)))
-plant = transform(plant, order = as.numeric(order), value = as.numeric(value))
-head(plant)
-```
-
-
-```{r}
-comp.3w = list(c("CHA0_vs_ASV1168", "CHA0_vs_ASV1173"), c("CHA0_vs_ASV1168", "ASV1168_vs_ASV1173"), c("CHA0_vs_ASV1168", "CHA0_vs_ASV1168_vs_ASV1173"),
-               c("CHA0_vs_ASV1173", "ASV1168_vs_ASV1173"), c("CHA0_vs_ASV1173", "CHA0_vs_ASV1168_vs_ASV1173"),
-               c("ASV1168_vs_ASV1173", "CHA0_vs_ASV1168_vs_ASV1173"))
-
-plantplot=ggplot(plant, aes(x = reorder(Competition, order), y = value, color = Competition)) +
-  geom_point(position = position_jitterdodge(dodge.width = 0.2, jitter.width = 0.2)) +
-  stat_summary(fun.data = "mean_sd", geom = "pointrange")+
-  stat_compare_means(test = "kruskal.test", comparisons = comp.3w, label = "p.signif")+
-  scale_color_manual(values=ocean.algae(5))+
-  facet_wrap2(~Condition, scales = "free_y", ncol = 5)+
-  theme_pubclean() +
-  theme(axis.text.x = element_text(angle = 50, vjust = 1, hjust=1), axis.line = element_line())
-plantplot
+plots_ps
 
 ```
-
-
-```{r}
-ggarrange(pw2, pw3, plantplot, ncol = 3, align = "hv", widths = c(2,2,4))
-
-```
-
-All done!
