@@ -30,21 +30,57 @@ library(tidyverse)
 library(data.table)
 
 #install and load other packages
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
 
-BiocManager::install(c("ggtree", "phyloseq", "Biostrings", "pals", "ggpubr", "picante", "ggh4x", "agricolae", "metagenomeSeq"))
+#BiocManager::install(c("phyloseq", "pals", "ggpubr", "ggh4x", "agricolae"), ask = FALSE)
 
 library(ggtree)
 
 library(phyloseq)
-library(Biostrings)
+
 library(pals)
 library(ggpubr)
 library(scales)
-library(picante)
+
 library(ggh4x)
 library(agricolae)
+```
+
+and functions required:
+
+```{r}
+#getting phyloseq_transform_css function from metagMisc
+phyloseq_transform_css <- function(physeq, norm = TRUE, log = TRUE, ...){
+
+  # require(metagenomeSeq)
+
+  MGS <- phyloseq::phyloseq_to_metagenomeSeq(physeq)
+
+  # get the normalized count matrix
+  otu_norm <- metagenomeSeq::MRcounts(MGS, norm = norm, log = log, ...)
+  # exportMat(datt.norm, file = "tmp.txt")    # norm = TRUE, log = TRUE
+  ## save sample statistics (sample scaling factor, quantile value, number of identified features and library size):
+  # exportStats(dattM.sf, file = "tmp_stats.txt")
+
+  # Substitue raw abundance to the css-normalized data
+  physeq.tr <- physeq
+  phyloseq::otu_table(physeq.tr) <- phyloseq::otu_table(otu_norm, taxa_are_rows = T)
+  return(physeq.tr)
+}
+
+#orient_taxa from speedyseq
+orient_taxa <- function(x, as) {
+  stopifnot(as %in% c("rows", "columns", "cols"))
+  if (identical(as, "rows")) {
+    if (!taxa_are_rows(x))
+      x <- t(x)
+  } else {
+    if (taxa_are_rows(x))
+      x <- t(x)
+  }
+  x
+}
 ```
 
 # 2. Load DADA2 results, phylogeny, and metadata
@@ -59,17 +95,6 @@ rownames(seqtab.nochim2) = gsub("_$", "", rownames(seqtab.nochim2))
 ```
 
 ```{r}
-tree = read.tree("seqtab.nochim_aln.fasta.contree")
-#Rename tip labels
-index = data.frame(seqs = rownames(taxa2))
-index = rownames_to_column(index, "index")
-tip_names = data.frame(index = tree$tip.label)
-tip_tax = left_join(tip_names, index, by = "index")
-tree$tip.label = tip_tax$seqs
-```
-
-
-```{r}
 metadata = read.table("metadata.txt", header = T, sep = "\t")
 rownames(metadata) = metadata$id_samples
 head(metadata)
@@ -80,13 +105,9 @@ head(metadata)
 ```{r, warnings = FALSE, error = FALSE, message = FALSE}
 ps <- phyloseq(otu_table(seqtab.nochim2, taxa_are_rows=F), 
                sample_data(metadata), 
-               tax_table(as.matrix(taxa2)),
-               phy_tree(tree))
+               tax_table(as.matrix(taxa2)))
 
-#Store the ASVs DNA sequences the refseq slot of the phyloseq object, and then rename our taxa to a short string.
-dna <- Biostrings::DNAStringSet(taxa_names(ps))
-names(dna) <- taxa_names(ps)
-ps <- merge_phyloseq(ps, dna)
+#rename our taxa to a short string.
 taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
 
 ps
@@ -181,25 +202,6 @@ ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
 For certain downstream analyses; for example to compare different abundances of taxa between samples, the counts needs to be normalized to account for different sampling efforts, exposures, baselines, etc. We will normalize the samples using the CSS (Cumulative Sum Scaling) introduced in [Paulson et al. 2013](https://doi.org/10.1038/nmeth.2658), where the offset of a sample is the cumulative sum of counts in that sample, up to a quantile determined in a data driven way. Calculates scaling factors as the cumulative sum of ASVs abundances up to a data-derived threshold.
 
 ```{r fig.width = 11, fig.height= 11,}
-#getting phyloseq_transform_css function from metagMisc
-phyloseq_transform_css <- function(physeq, norm = TRUE, log = TRUE, ...){
-
-  # require(metagenomeSeq)
-
-  MGS <- phyloseq::phyloseq_to_metagenomeSeq(physeq)
-
-  # get the normalized count matrix
-  otu_norm <- metagenomeSeq::MRcounts(MGS, norm = norm, log = log, ...)
-  # exportMat(datt.norm, file = "tmp.txt")    # norm = TRUE, log = TRUE
-  ## save sample statistics (sample scaling factor, quantile value, number of identified features and library size):
-  # exportStats(dattM.sf, file = "tmp_stats.txt")
-
-  # Substitue raw abundance to the css-normalized data
-  physeq.tr <- physeq
-  phyloseq::otu_table(physeq.tr) <- phyloseq::otu_table(otu_norm, taxa_are_rows = T)
-  return(physeq.tr)
-}
-
 #Ussing the CSS
 ps2.css = phyloseq_transform_css(ps2, norm = T, log = F)
 ps2.css = orient_taxa(ps2.css, "columns") #change taxa to columns
@@ -250,12 +252,12 @@ plot_bar(ps2.propCHA0, x="id_samples", fill="Species")+
 ```{r}
 #Subset for CHA0 with the CSS
 ps2.propCHA0 = subset_taxa(ps2.css.prop, Species=="protegens")
-CHA0_abund = left_join(data.frame(sample_data(ps2.propCHA0)), rownames_to_column(data.frame(t(otu_table(ps2.propCHA0))), "id_samples"), by=c("id_samples"))
+CHA0_abund = left_join(data.frame(sample_data(ps2.propCHA0)), rownames_to_column(data.frame(otu_table(ps2.propCHA0)), "id_samples"), by=c("id_samples"))
 
 CHA0_abund$StateEnviron = paste0(CHA0_abund$ComState, "_", CHA0_abund$Environment, "_", CHA0_abund$Inoculant)
 
 #stats
-kw = agricolae::kruskal(CHA0_abund$ASV1148, CHA0_abund$StateEnviron, p.adj = "BH")
+kw = agricolae::kruskal(CHA0_abund$ASV4, CHA0_abund$StateEnviron, p.adj = "BH")
 kwres = rownames_to_column(kw$groups, var="StateEnviron")
 
 
@@ -270,7 +272,7 @@ stat_box_data <- function(y, upper_limit = max(log(CHA0_abund$ASV1148)) -max(log
 }
 
 
-ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV1148))) +
+ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV4))) +
   geom_boxplot() +
   geom_jitter(color="#00cc74", size=2, shape=16)+
   xlab("") + ylab("Normalized P. protegens ASV relative abundance (%)")+
@@ -292,10 +294,19 @@ ggplot(CHA0_abund, aes(x=StateEnviron, y=as.numeric(ASV1148))) +
 ## 6.3 Differences at the Class level.
 
 ```{r warning=FALSE}
+#Define top classes:
+Class_abundtax_top = filter(Class_abundtax, Class!="Abditibacteria" & Class!="Acidobacteriae" & Class!="Gemmatimonadetes" & 
+                Class!="Clostridia" & Class!="Longimicrobia" &
+                Class!="Coriobacteriia" &
+                Class!="Deinococci" &
+                Class!="Myxococcia" &
+                Class!="Negativicutes" &
+                Class!="Thermoanaerobacteria")
+
 #merge taxa by Class!
 Class_glom = tax_glom(ps2.css.prop, taxrank = "Class")
 
-Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(t(otu_table(Class_glom))), "id_samples"), by=c("id_samples"))
+Class_abund = left_join(data.frame(sample_data(Class_glom)), rownames_to_column(data.frame(otu_table(Class_glom)), "id_samples"), by=c("id_samples"))
 Class_abund$StateEnviron = paste0(Class_abund$ComState, "_", Class_abund$Environment, "_", Class_abund$Inoculant)
 Class_abund$Time = as.character(Class_abund$Time)
 Class_abund.melt = Class_abund %>% select(-Replicate, -ng.uL) %>% reshape::melt(value.name = "value")
@@ -340,7 +351,7 @@ ps2.css_noCHA0.prop = transform_sample_counts(ps2.css_noCHA0, function(x) {x/sum
 #Frist, merge taxa by Class!
 noCHA0_Class_glom = tax_glom(ps2.css_noCHA0.prop, taxrank = "Class")
 noCHA0_Class_abund = left_join(data.frame(sample_data(noCHA0_Class_glom)), 
-                               rownames_to_column(data.frame(t(otu_table(noCHA0_Class_glom))), "id_samples"), by=c("id_samples"))
+                               rownames_to_column(data.frame(otu_table(noCHA0_Class_glom)), "id_samples"), by=c("id_samples"))
 noCHA0_Class_abund$StateEnviron = paste0(noCHA0_Class_abund$ComState, "_", 
                                          noCHA0_Class_abund$Environment, "_", 
                                          noCHA0_Class_abund$Inoculant)
@@ -375,12 +386,11 @@ for (i in unique(noCHA0_Class_abundtax_top$Class)){
 
 ```
 
-
 # 7. Diversity
 
 ## 7.1 Diversity indexes
 
-Observed ASVs, Shannon index and Faith's phylogenetic diversity.
+Observed ASVs and Shannon index diversity.
 
 ```{r }
 #Order by ComState+Environment+Inoculant
@@ -399,8 +409,8 @@ order.cols = data.frame("Names"=order.samples) %>% left_join(metadata, by="Names
 
 #Observed ASVs
 diver.ob = plot_richness(ps2, x="Names", measures=c("Observed"))+
-  geom_bar(position = "identity", stat = "summary", aes(y=value-100), fill="darkgrey")+
-  geom_errorbar(stat = "summary", width=0.75, aes(y=value-100)) + 
+  geom_bar(position = "identity", stat = "summary", aes(y=value-100), fill="darkgrey", fun=mean)+
+  geom_errorbar(stat = "summary", width=0.75, aes(y=value-100), fun=mean) + 
   geom_jitter(width = 0.2, alpha=0.75, size=1, aes(y=value-100))+
   scale_y_continuous(breaks=c(0,100,200), labels=c(100, 200, 300))+
   facet_wrap(~variable,scales = "free_x", nrow = 1)+
@@ -414,8 +424,8 @@ diver.ob$data$Names <- factor(diver.ob$data$Names, levels=rev(order.samples))
 
 #calculate shannon independently for better representation
 diver.sha = plot_richness(ps2, x="Names", measures=c("Shannon"))+
-  geom_bar(position = "identity", stat = "summary", aes(y=value-2), fill="darkgrey")+
-  geom_errorbar(stat = "summary", width=0.75, aes(y=value-2)) + 
+  geom_bar(position = "identity", stat = "summary", aes(y=value-2), fill="darkgrey", fun=mean)+
+  geom_errorbar(stat = "summary", width=0.75, aes(y=value-2), fun=mean) + 
   geom_jitter(width = 0.2, alpha=0.75, size=1, aes(y=value-2))+
   scale_y_continuous(breaks=c(0.0,0.5,1.0,1.5,2.0), labels=c(2, 2.5, 3,3.5,4))+
   facet_wrap(~variable,scales = "free_x", nrow = 1)+
@@ -426,35 +436,10 @@ diver.sha$layers = diver.sha$layers[-1]
 diver.sha$data$Names <- as.character(diver.sha$data$Names)
 diver.sha$data$Names <- factor(diver.sha$data$Names, levels=rev(order.samples))
 
-#and Faith's PD
-pd = pd(otu_table(ps2), phy_tree(ps2), include.root = F)
-pd = pd %>% rownames_to_column("id_samples") %>% left_join(metadata, by="id_samples")
-pd$Names = gsub("_[123456]$", "", pd$Names)
-diver.pd = ggplot(pd, aes(Names, PD)) + 
-  geom_bar(position = "identity", stat = "summary", aes(y=PD-20), fill="darkgrey")+
-  geom_errorbar(stat = "summary",width=0.75, aes(y=PD-20)) + 
-  geom_jitter(width = 0.2, alpha=0.75, size=1, aes(y=PD-20))+
-  scale_y_continuous(breaks=c(0,10,20), labels=c(20, 30, 40))+
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="Faith's PD")))+
-  ggpubr::rotate() +
-  theme_pubclean() + theme(legend.position = "bottom", 
-                           axis.text.x = element_text(angle = 90, vjust = 0, hjust=1)) + xlab("")
-  
-diver.pd$data$Names = as.character(diver.pd$data$Names)
-diver.pd$data$Names = factor(diver.pd$data$Names, levels=rev(order.samples))
 
 ggarrange(diver.ob+theme(legend.position = "", axis.line = element_line())+scale_color_manual(values=rev(order.cols$Cols)),
-          diver.sha+theme(legend.position = "", axis.line = element_line())+scale_color_manual(values=rev(order.cols$Cols)),
-          diver.pd+theme(legend.position = "", axis.line = element_line())+scale_color_manual(values=rev(order.cols$Cols)), 
+          diver.sha+theme(legend.position = "", axis.line = element_line())+scale_color_manual(values=rev(order.cols$Cols)), 
           ncol=3, widths = c(1,1,1), common.legend = T, legend = "bottom", align = "hv")
-
-
-#Save all diversity values in a table for manual inspection
-diversity_all = pd %>% dplyr::select(id_samples, Names, PD)  %>% 
-  left_join(select(diver.ob$data, id_samples, Observed_ASVs = value), by = c("id_samples")) %>%
-  left_join(select(diver.sha$data, id_samples, Shannon = value), by = c("id_samples"))
-
-#write.table(diversity_all, "Diversity_indexes.txt", quote = F, sep = "\t", row.names = F)
 
 ```
 
@@ -501,7 +486,7 @@ observed_all = ggarrange(diver.ob.comstate,
           nrow = 1, align = "h",
           widths = c(4,5.5,9.5))
 
-#SHANNON ASVs
+#SHANNON
 diver.sha.comstate = plot_richness(ps2, x="ComState", measures=c("Shannon"))+geom_boxplot()+
   ylab("SHannon")+
   stat_compare_means(method="wilcox.test", comparisons = list(c("Growing", "Stable")), label = "p.signif") +
@@ -541,59 +526,17 @@ shannon_all = ggarrange(diver.sha.comstate,
           nrow = 1, align = "h",
           widths = c(4,5.5,9.5))
 
-#PD
-diver.pd.comstate = ggplot(pd, aes(ComState, PD)) + geom_boxplot() +
-  ylab("Faith's PD")+
-  stat_compare_means(method="wilcox.test", comparisons = list(c("Growing", "Stable")), label = "p.format") +
-  facet_wrap(NULL, labeller=as_labeller(c("(all)"="Faith's PD")), nrow = 1)+
-  theme_pubclean() + theme(legend.position = "bottom", 
-                           axis.text.x = element_text(angle = 90, vjust = 0, hjust=1),
-                           axis.line = element_line())
-
-diver.pd.comstate$data$Names = as.character(diver.pd.comstate$data$Names)
-diver.pd.comstate$data$Names = factor(diver.pd.comstate$data$Names, levels=rev(order.samples))
-
-diver.pd.environ = ggplot(pd, aes(Environment, PD)) + geom_boxplot() +
-  ylab("Faith's PD")+
-  stat_compare_means(method="wilcox.test", comparisons = list(c("Bulk", "Rhiz")), label = "p.format") +
-  facet_wrap(~ComState, nrow = 1)+
-  theme_pubclean() + theme(legend.position = "bottom", 
-                           axis.text.x = element_text(angle = 90, vjust = 0, hjust=1),
-                           axis.line = element_line())
-
-diver.pd.environ$data$Names = as.character(diver.pd.environ$data$Names)
-diver.pd.environ$data$Names = factor(diver.pd.environ$data$Names, levels=rev(order.samples))
-
-diver.pd.inoculant = ggplot(pd, aes(Inoculant, PD)) + geom_boxplot() +
-  ylab("Faith's PD")+
-  stat_compare_means(method="wilcox.test", comparisons = list(c("CHA0", "noCHA0")), label = "p.format") +
-  facet_wrap(~ComState+Environment, nrow = 1)+
-  theme_pubclean() + theme(legend.position = "bottom", 
-                           axis.text.x = element_text(angle = 90, vjust = 0, hjust=1),
-                           axis.line = element_line())
-
-diver.pd.inoculant$data$Names = as.character(diver.pd.inoculant$data$Names)
-diver.pd.inoculant$data$Names = factor(diver.pd.inoculant$data$Names, levels=rev(order.samples))
-
-pd_all = ggarrange(diver.pd.comstate, 
-          diver.pd.environ+ylab("")+theme(axis.text.y=element_blank()), 
-          diver.pd.inoculant+ylab("")+theme(axis.text.y=element_blank()),
-          nrow = 1, align = "h",
-          widths = c(4,5.5,9.5))
-
-ggarrange(observed_all, shannon_all, pd_all, nrow = 3)
+ggarrange(observed_all, shannon_all, nrow = 2)
 ```
 
 ## 7.3 Correlation of diversity vs. time
 
 
 ```{r }
-library(ggpmisc)
-
 #SHANNON
 ggplot(diver.sha$data, aes(x=as.numeric(Time), y=value, color=ComState, fill=ComState)) + geom_point() + ylab("Shannon") +
   xlab("Time (days)") + ggtitle("Spearman correlation")+
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k=3), size=0.5) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k=3), linewidth=0.5) +
   stat_cor(method = "spearman") +
   scale_color_manual(values=c("#28511b", "#ccae00"))+
   scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9), labels = c(1,"","","",5,"",7,"",9))+
@@ -601,21 +544,11 @@ ggplot(diver.sha$data, aes(x=as.numeric(Time), y=value, color=ComState, fill=Com
   facet_wrap(~Inoculant+Environment, scales = "free_x")+
   theme_pubclean()+ theme(axis.line = element_line())
 
-#PD
-ggplot(diver.pd$data, aes(x=as.numeric(Time), y=PD, color=ComState, fill=ComState)) + geom_point() + ylab("Faith's PD") +
-  xlab("Time (days)") + ggtitle("Spearman correlation")+
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k=3), size=0.5) +
-  stat_cor(method = "spearman") +
-  scale_color_manual(values=c("#28511b", "#ccae00"))+
-  scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9), labels = c(1,"","","",5,"",7,"",9))+
-  scale_fill_manual(values=c("#28511b", "#ccae00"))+
-  facet_wrap(~Inoculant+Environment, scales = "free_x")+
-  theme_pubclean()+ theme(axis.line = element_line())
 
 #Observed ASVs
 ggplot(diver.ob$data, aes(x=as.numeric(Time), y=value, color=ComState, fill=ComState)) + geom_point() + ylab("Observed ASVs") +
   xlab("Time (days)") + ggtitle("Spearman correlation")+
-  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k=3), size=0.5) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k=3), linewidth=0.5) +
   stat_cor(method = "spearman") +
   scale_color_manual(values=c("#28511b", "#ccae00"))+
   scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9), labels = c(1,"","","",5,"",7,"",9))+
@@ -625,9 +558,7 @@ ggplot(diver.ob$data, aes(x=as.numeric(Time), y=value, color=ComState, fill=ComS
 
 ```
 
-
 # 8. NMDS
-
 
 ```{r}
 set.seed(1234)
@@ -896,8 +827,6 @@ ggplot(filter(bray.rep.info, ComState.x == ComState.y & Environment.x == Environ
 ps2.prop = transform_sample_counts(ps2, function(x) {x/sum(x)*100})
 #Filter tax table for Pseudomonas ASVs
 ps2.propPseudo = subset_taxa(ps2.prop, Genus=="Pseudomonas")
-#Write all pseudomonas refseqs:
-write.table(refseq(ps2.propPseudo), "ref-seq_PSEUDO_all.txt", sep = "\t", quote = F, col.names = F)
 
 #retrieve top 5
 toptax.Pseudo = names(sort(taxa_sums(ps2.propPseudo), decreasing=TRUE))[1:5]
@@ -931,27 +860,30 @@ Pseudo.css = as.data.frame(otu_table(ps.css.toptax.Pseudo))
 Pseudo.css = rownames_to_column(Pseudo.css, "id_samples")
 Pseudo.css.melt = reshape2::melt(Pseudo.css)
 Pseudo.css.melt = Pseudo.css.melt %>% 
-  left_join(data.frame(sample_data(ps2.css.propPseudo)), by= join_by("variable" == "id_samples"))
+  left_join(data.frame(sample_data(ps2.css.propPseudo)), by= "id_samples")
 head(Pseudo.css.melt)
 ```
 
 
 ```{r warning=FALSE}
-Pseudo.melt.filtered = filter(Pseudo.css.melt, id_samples %in% c("ASV1142","ASV1148", "ASV1168", "ASV1169", "ASV1173") & Time %in% c(1,9))
+toptax.css.Pseudo = as.character(unlist(toptax.css.Pseudo, use.names = FALSE))
+Pseudo.melt.filtered = filter(Pseudo.css.melt, variable %in% toptax.css.Pseudo & Time %in% c(1,9))
 
+cols = c("#e0bd89", "#31a872", "#3b79bc", "purple", "#c42c2c")
 
 plots_ps = list()
 
-for (i in c("ASV1142","ASV1148", "ASV1168", "ASV1169", "ASV1173")){
+for (k in seq_along(toptax.css.Pseudo)){
+  i = toptax.css.Pseudo[k]
   pseudo_name = i
-  df = filter(Pseudo.melt.filtered, id_samples == i)
+  df = filter(Pseudo.melt.filtered, variable == i)
   kw = agricolae::kruskal(df$value, df$Names, p.adj = "BH")
   kwres = rownames_to_column(kw$groups, var="StateEnviron")
   
   plots_ps[[i]] = ggplot(df, aes(x=Names, y=value)) +
-  #geom_bar(position = "identity", stat = "summary", fill="darkgrey", width = 0.7, fun = mean) +
   geom_segment(aes(y = value, yend = 0), stat = "summary", 
-               position = "identity", width = 0.7, fun = mean, size = 15, color="darkgrey")+
+               position = "identity", width = 0.7, fun = mean, 
+               size = 15, color = cols[(k-1) %% length(cols) + 1])+
   geom_jitter(shape=16, width = 0.2)+
   annotate(geom = "text", x=kwres$StateEnviron, y=100, label=kwres$groups)+
   xlab("Sampling time (days)") + ylab("Normalized relative abundance (%)")+
