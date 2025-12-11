@@ -25,6 +25,8 @@ Garrido-Sanz, D., Čaušević, S., Vacheron, J. et al. Changes in structure and 
 
 # 1. Load required packages
 
+
+
 ```{r, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(data.table)
@@ -34,11 +36,12 @@ library(scales)
 #if (!require("BiocManager", quietly = TRUE))
 #    install.packages("BiocManager")
 
-BiocManager::install(c("phyloseq", "agricolae"), ask = FALSE)
+BiocManager::install(c("phyloseq", "agricolae", "ggpubr"), update = F, ask = F)
 
 
 library(phyloseq)
 library(agricolae)
+library(ggpubr)
 ```
 
 and functions required:
@@ -793,7 +796,7 @@ for (i in unique(Class_abundtax_top$Class)){
     geom_jitter(aes(color=Class), size=1.75, shape=16)+
     annotate(geom = "text", x=kwres$StateEnviron, y= max(class_filt$value)*1.2, label=kwres$groups)+
     xlab("") + ylab("ASVs normalized relative abundance (%)")+
-    ggtitle("Class abundance", subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
+    ggtitle(paste0(i, " abundance"), subtitle = paste0("Kruskal-Wallis p-value = ",  kw$statistics$p.chisq))+
     scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x))+
     annotation_logticks(sides = "l") +
     facet_wrap(~Class, nrow = 1)+
@@ -881,7 +884,7 @@ diver.ob = plot_richness(ps2, x="Names", measures=c("Observed"))+
   geom_jitter(width = 0.2, alpha=0.75, size=1, aes(y=value-100))+
   scale_y_continuous(breaks=c(0,100,200), labels=c(100, 200, 300))+
   facet_wrap(~variable,scales = "free_x", nrow = 1)+
-  ggpubr::rotate() +
+  coord_flip() +
   theme_bw() + theme(legend.position = "bottom", 
                            axis.text.x = element_text(angle = 90, vjust = 0, hjust=1))
 
@@ -896,7 +899,7 @@ diver.sha = plot_richness(ps2, x="Names", measures=c("Shannon"))+
   geom_jitter(width = 0.2, alpha=0.75, size=1, aes(y=value-2))+
   scale_y_continuous(breaks=c(0.0,0.5,1.0,1.5,2.0), labels=c(2, 2.5, 3,3.5,4))+
   facet_wrap(~variable,scales = "free_x", nrow = 1)+
-  ggpubr::rotate() +
+  coord_flip() +
   theme_bw() + theme(legend.position = "bottom", 
                            axis.text.x = element_text(angle = 90, vjust = 0, hjust=1))
 diver.sha$layers = diver.sha$layers[-1]
