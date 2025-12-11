@@ -34,11 +34,10 @@ library(scales)
 #if (!require("BiocManager", quietly = TRUE))
 #    install.packages("BiocManager")
 
-BiocManager::install(c("phyloseq", "ggh4x", "agricolae"), ask = FALSE)
+BiocManager::install(c("phyloseq", "agricolae"), ask = FALSE)
 
 
 library(phyloseq)
-library(ggh4x)
 library(agricolae)
 ```
 
@@ -1199,8 +1198,7 @@ bray.rep.info = bray.rep.info %>% filter(sample1 != sample2) %>% select(-Replica
 ```
 
 
-```{r )}
-library(ggpmisc)
+```{r}
 ggplot(filter(bray.rep.info, ComState.x == ComState.y & Environment.x == Environment.y & Inoculant.x == Inoculant.y & Time.x == Time.y),
               aes(x=as.numeric(Time.x), y=BC_diss, color=ComState.x, fill=ComState.x)) + 
   geom_point() + ylab("Bray-Curtis dissimilarity") +
